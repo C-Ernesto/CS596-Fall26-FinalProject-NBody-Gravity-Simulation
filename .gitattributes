@@ -1,0 +1,13 @@
+# Keep source files portable between Windows development and the Linux CARC cluster.
+* text=auto
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.cu text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+*.sh text eol=lf
+*.slurm text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.csv text eol=lf
+

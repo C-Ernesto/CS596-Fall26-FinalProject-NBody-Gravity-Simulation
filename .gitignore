@@ -1,0 +1,36 @@
+# Build output
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+compile_commands.json
+
+# Compiled artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.exe
+
+# Generated project output (keep directory placeholders)
+results/*
+!results/.gitkeep
+visualization/output/*
+!visualization/output/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
