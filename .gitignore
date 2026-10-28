@@ -1,13 +1,17 @@
-# Build output
-build/
-cmake-build-*/
+# CMake build trees and generated files
+/build*/
+/cmake-build-*/
 CMakeCache.txt
 CMakeFiles/
+CTestTestfile.cmake
+DartConfiguration.tcl
 Makefile
 cmake_install.cmake
 compile_commands.json
+install_manifest.txt
+CMakeUserPresets.json
 
-# Compiled artifacts
+# Compiled and linked artifacts
 *.o
 *.obj
 *.a
@@ -16,21 +20,44 @@ compile_commands.json
 *.dll
 *.dylib
 *.exe
+*.exp
+*.ilk
+*.pdb
 
-# Generated project output (keep directory placeholders)
-results/*
-!results/.gitkeep
-visualization/output/*
-!visualization/output/.gitkeep
+# Generated benchmark and visualization output (keep placeholders)
+/results/*
+!/results/.gitkeep
+/visualization/output/*
+!/visualization/output/.gitkeep
 
-# Python
+# Scheduler and runtime output
+slurm-*.out
+*.log
+
+# Python caches, environments, and tooling output
 __pycache__/
 *.py[cod]
 .venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
 
 # Editors and operating systems
 .vscode/
 .idea/
+.vs/
+*.user
+*.suo
 .DS_Store
 Thumbs.db
 
+# Local planning notes (not part of the distributable project)
+/N-Body_CPU_GPU_Project_Plan.md

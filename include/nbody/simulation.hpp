@@ -16,5 +16,17 @@ Bodies initialize_bodies(std::size_t count, std::uint64_t seed);
 Accelerations compute_acceleration_serial(const Bodies& bodies, double epsilon);
 Accelerations compute_acceleration_openmp(const Bodies& bodies, double epsilon);
 
+Accelerations compute_acceleration_cuda_naive(
+    const Bodies& bodies,
+    double epsilon,
+    int block_size
+);
+
+Accelerations compute_acceleration_cuda_tiled(
+    const Bodies& bodies,
+    double epsilon,
+    int block_size
+);
+
 }  // namespace nbody
 
