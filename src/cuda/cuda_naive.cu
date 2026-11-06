@@ -7,6 +7,7 @@
 #include <cuda_runtime.h>
 #include <string>
 #include <stdexcept>
+#include "cuda_integration.cuh"
 
 namespace nbody {
 
@@ -135,5 +136,106 @@ namespace nbody {
         return acceleration_vector;
 
     }
-    
-}
+
+    Bodies simulate_cuda_naive(
+        const Bodies& initial_bodies,
+        std::size_t steps,
+        double dt,
+        double epsilon,
+        int block_size
+    ) {
+        // copy initial bodies
+        Bodies final_bodies = initial_bodies;
+
+        // check that bodies is not empty
+        if (final_bodies.empty() || steps == 0) {
+            return final_bodies;
+        }
+
+        // check all params are valid
+        if (dt <= 0.0) {
+            throw std::invalid_argument("dt must be positive");
+        }
+
+        if (epsilon < 0.0) {
+            throw std::invalid_argument("epsilon cannot be negative");
+        }
+
+        if (block_size <= 0) {
+            throw std::invalid_argument("block size must be positive");
+        }
+        
+        // make 2 local pointers
+        Body* device_bodies = nullptr;
+        Acceleration* device_accelerations = nullptr;
+
+        // calculate body and acceleration bytes
+        const std::size_t body_bytes = final_bodies.size() * sizeof(Body);
+        const std::size_t acceleration_bytes = final_bodies.size() * sizeof(Acceleration);
+
+        // calculate threads per block and grid size
+        const std::size_t threads_per_block = static_cast<std::size_t>(block_size);
+        const std::size_t grid_size = (final_bodies.size() + threads_per_block - 1) / threads_per_block;
+
+        const double epsilon_squared = epsilon * epsilon;
+
+        try
+        {
+            // malloc for bodies and acceleration
+            const cudaError_t body_alloc_res = cudaMalloc(reinterpret_cast<void**>(&device_bodies), body_bytes);
+            check_cuda(body_alloc_res, "CUDA Malloc for bodies");
+            const cudaError_t acc_alloc_res = cudaMalloc(reinterpret_cast<void**>(&device_accelerations), acceleration_bytes);
+            check_cuda(acc_alloc_res, "CUDA Malloc for acceleration");
+
+            // copy final_bodies to device_bodies
+            const cudaError_t body_copy_res = cudaMemcpy(device_bodies, final_bodies.data(), body_bytes, cudaMemcpyHostToDevice);
+            check_cuda(body_copy_res, "CUDA Mem copy for bodies, host to device");
+
+            // run acceleration kernel
+            acceleration_kernel<<<grid_size, threads_per_block>>>(device_bodies, device_accelerations, final_bodies.size(), epsilon_squared);
+            const cudaError_t acc_kernel_res = cudaGetLastError();
+            check_cuda(acc_kernel_res, "initial acceleration kernel launch");
+
+            // velocity verlet loop
+            for (std::size_t step = 0; step < steps; ++step) {
+                cuda_detail::kick_drift_kernel<<<grid_size, threads_per_block>>>(device_bodies, device_accelerations, final_bodies.size(), dt);
+                const cudaError_t kick_drift_result = cudaGetLastError();
+                check_cuda(kick_drift_result, "kick drift kernel launch");
+
+                acceleration_kernel<<<grid_size, threads_per_block>>>(device_bodies, device_accelerations, final_bodies.size(), epsilon_squared);
+                const cudaError_t step_acceleration_result = cudaGetLastError();
+                check_cuda(step_acceleration_result, "acceleration kernel launch");
+
+                cuda_detail::final_kick_kernel<<<grid_size, threads_per_block>>>(device_bodies, device_accelerations, final_bodies.size(), dt);
+                const cudaError_t final_kick_result = cudaGetLastError();
+                check_cuda(final_kick_result, "final kick kernel launch");
+
+            }
+
+            const cudaError_t sync_result = cudaDeviceSynchronize();
+            check_cuda(sync_result, "naive simulation execution");
+
+            const cudaError_t copy_body_dev_to_host = cudaMemcpy(final_bodies.data(), device_bodies, body_bytes, cudaMemcpyDeviceToHost);
+            check_cuda(copy_body_dev_to_host, "copy final bodies from device to host");
+        }
+        catch(...)
+        {
+            if (device_bodies != nullptr) {
+                (void)cudaFree(device_bodies);
+            }
+            if (device_accelerations != nullptr) {
+                (void)cudaFree(device_accelerations);
+            }
+
+            throw;
+        }
+
+        const cudaError_t free_bodies_result = cudaFree(device_bodies);
+        const cudaError_t free_accelerations_result = cudaFree(device_accelerations);
+        check_cuda(free_bodies_result, "cudaFree simulation bodies"); // only check after both alloc are freed
+        check_cuda(free_accelerations_result, "cudaFree simulation acceleration");
+
+        return final_bodies;
+    }
+
+} // end of namespace

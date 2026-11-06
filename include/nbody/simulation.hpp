@@ -28,5 +28,21 @@ Accelerations compute_acceleration_cuda_tiled(
     int block_size
 );
 
+Bodies simulate_cuda_naive(
+    const Bodies& initial_bodies,
+    std::size_t steps,
+    double dt,
+    double epsilon,
+    int block_size
+);
+
+Bodies simulate_cuda_tiled(
+    const Bodies& initial_bodies,
+    std::size_t steps,
+    double dt,
+    double epsilon,
+    int block_size
+);
+
 }  // namespace nbody
 
