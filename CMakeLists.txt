@@ -31,6 +31,7 @@ if(OpenMP_CXX_FOUND)
 endif()
 
 if(NBODY_ENABLE_CUDA)
+    set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
     enable_language(CUDA)
     add_library(nbody_cuda
         src/cuda/cuda_naive.cu

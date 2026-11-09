@@ -11,6 +11,7 @@ enum class Implementation { serial, openmp, cuda_naive, cuda_tiled };
 struct Config {
     Implementation implementation{Implementation::serial};
     std::size_t bodies{1024};
+    std::size_t repetitions{5};
     std::size_t steps{100};
     double dt{0.001};
     double epsilon{0.01};

@@ -50,6 +50,15 @@ Config parse_arguments(int argc, char** argv) {
             config.block_size = std::stoi(require_value(i, argc, argv));
         } else if (option == "--output") {
             config.output = require_value(i, argc, argv);
+        } else if (option == "--repetitions") {
+            const long long repetitions =
+                std::stoll(require_value(i, argc, argv));
+
+            if (repetitions <= 0) {
+                throw std::invalid_argument("--repetitions must be positive");
+            }
+
+            config.repetitions = static_cast<std::size_t>(repetitions);
         } else {
             throw std::invalid_argument("unknown option: " + std::string(option));
         }
@@ -82,7 +91,8 @@ void print_help(const char* program_name) {
         << "  --seed N            Initialization seed (default: 12345)\n"
         << "  --threads N         OpenMP thread count\n"
         << "  --block-size N      CUDA block size (default: 256)\n"
-        << "  --output FILE       Future CSV output path\n";
+        << "  --output FILE       Future CSV output path\n"
+        << "  --repetitions N     Timed repetitions (default: 5)\n";
 }
 
 }  // namespace nbody
