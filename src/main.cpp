@@ -1,11 +1,13 @@
 #include "nbody/config.hpp"
 #include "nbody/simulation.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <exception>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <stdexcept>
-#include <chrono>
-#include <algorithm>
 #include <vector>
 
 int main(int argc, char** argv) {
@@ -64,13 +66,15 @@ int main(int argc, char** argv) {
             // add time to vector
             simulation_times.push_back(elapsed_time.count());
         }
+        
         // get median time
-        std::sort(simulation_times.begin(), simulation_times.end());
-        const std::size_t middle = simulation_times.size() / 2;
+        std::vector<double> sorted_times = simulation_times;
+        std::sort(sorted_times.begin(), sorted_times.end());
+        const std::size_t middle = sorted_times.size() / 2;
 
-        const double median_time = simulation_times.size() % 2 == 0
-                        ? (simulation_times[middle - 1] + simulation_times[middle]) / 2.0
-                        : simulation_times[middle];
+        const double median_time = sorted_times.size() % 2 == 0
+                        ? (sorted_times[middle - 1] + sorted_times[middle]) / 2.0
+                        : sorted_times[middle];
 
         std::cout << "N-body simulation completed\n"
                   << "  implementation: " << nbody::to_string(config.implementation) << '\n'
@@ -86,6 +90,55 @@ int main(int argc, char** argv) {
                     << final_bodies[0].x << ", "
                     << final_bodies[0].y << ", "
                     << final_bodies[0].z << ")\n";
+        }
+
+        if (!config.output.empty()) {
+            bool write_header = true;
+            {
+                std::ifstream existing_output(
+                    config.output,
+                    std::ios::binary | std::ios::ate
+                );
+                if (existing_output) {
+                    write_header = existing_output.tellg() == 0;
+                }
+            }
+
+            std::ofstream csv_output(config.output, std::ios::app);
+            if (!csv_output) {
+                throw std::runtime_error(
+                    "could not open CSV output file: " + config.output
+                );
+            }
+
+            csv_output << std::setprecision(17);
+            if (write_header) {
+                csv_output
+                    << "implementation,bodies,steps,dt,epsilon,seed,threads,"
+                    << "block_size,repetition,time_ms\n";
+            }
+
+            for (std::size_t i = 0; i < simulation_times.size(); ++i) {
+                csv_output
+                    << nbody::to_string(config.implementation) << ','
+                    << config.bodies << ','
+                    << config.steps << ','
+                    << config.dt << ','
+                    << config.epsilon << ','
+                    << config.seed << ','
+                    << config.threads << ','
+                    << config.block_size << ','
+                    << (i + 1) << ','
+                    << simulation_times[i] << '\n';
+            }
+
+            if (!csv_output) {
+                throw std::runtime_error(
+                    "failed while writing CSV output file: " + config.output
+                );
+            }
+
+            std::cout << "  results appended to: " << config.output << '\n';
         }
         
         return 0;
