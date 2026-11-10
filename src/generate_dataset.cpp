@@ -1,3 +1,4 @@
+#include "nbody/initial_conditions.hpp"
 #include "nbody/simulation.hpp"
 
 #include <algorithm>
@@ -28,6 +29,10 @@ struct Options {
     int block_size{64};
     std::size_t verify_every{1};
     double verification_tolerance{1e-10};
+    nbody::InitialConditionFamily family{
+        nbody::InitialConditionFamily::uniform_cube
+    };
+    nbody::InitialConditionParameters initial_condition_parameters{};
     std::filesystem::path output{"data/raw/pilot_cuda.csv"};
     bool overwrite{false};
 };
@@ -76,6 +81,13 @@ void print_help(const char* program_name) {
         << "  --block-size N                CUDA block size (default: 64)\n"
         << "  --verify-every N              Verify every Nth snapshot; 0 disables\n"
         << "  --verification-tolerance V    Naive/tiled tolerance (default: 1e-10)\n"
+        << "  --initial-condition NAME      uniform_cube|plummer_sphere|\n"
+        << "                                two_cluster_collision|rotating_disk\n"
+        << "  --position-scale VALUE        Family length scale (default: 1.0)\n"
+        << "  --velocity-scale VALUE        Velocity/noise scale (default: 0.01)\n"
+        << "  --cluster-separation VALUE    Cluster-center separation (default: 4.0)\n"
+        << "  --cluster-speed VALUE         Inward cluster speed (default: 0.2)\n"
+        << "  --disk-thickness VALUE        Disk z standard deviation (default: 0.05)\n"
         << "  --output FILE                 Output CSV path\n"
         << "  --overwrite                   Replace an existing output file\n";
 }
@@ -127,6 +139,30 @@ Options parse_arguments(int argc, char** argv) {
             options.verify_every = std::stoull(value);
         } else if (option == "--verification-tolerance") {
             options.verification_tolerance = std::stod(
+                require_value(i, argc, argv)
+            );
+        } else if (option == "--initial-condition") {
+            options.family = nbody::parse_initial_condition(
+                require_value(i, argc, argv)
+            );
+        } else if (option == "--position-scale") {
+            options.initial_condition_parameters.position_scale = std::stod(
+                require_value(i, argc, argv)
+            );
+        } else if (option == "--velocity-scale") {
+            options.initial_condition_parameters.velocity_scale = std::stod(
+                require_value(i, argc, argv)
+            );
+        } else if (option == "--cluster-separation") {
+            options.initial_condition_parameters.cluster_separation = std::stod(
+                require_value(i, argc, argv)
+            );
+        } else if (option == "--cluster-speed") {
+            options.initial_condition_parameters.cluster_speed = std::stod(
+                require_value(i, argc, argv)
+            );
+        } else if (option == "--disk-thickness") {
+            options.initial_condition_parameters.disk_thickness = std::stod(
                 require_value(i, argc, argv)
             );
         } else if (option == "--output") {
@@ -198,11 +234,13 @@ void write_snapshot(
     double dt,
     std::uint64_t seed,
     double epsilon,
+    nbody::InitialConditionFamily family,
+    const nbody::InitialConditionParameters& parameters,
     const nbody::Bodies& bodies,
     const nbody::Accelerations& accelerations
 ) {
     const double physical_time = static_cast<double>(time_step) * dt;
-    const double characteristic_radius = std::sqrt(3.0);
+    const double system_radius = nbody::characteristic_radius(family, parameters);
     double total_mass = 0.0;
     for (const nbody::Body& body : bodies) {
         total_mass += body.mass;
@@ -220,10 +258,15 @@ void write_snapshot(
             << body_id << ','
             << bodies.size() << ','
             << seed << ','
-            << "uniform_cube" << ','
-            << characteristic_radius << ','
+            << nbody::to_string(family) << ','
+            << system_radius << ','
             << total_mass << ','
             << epsilon << ','
+            << parameters.position_scale << ','
+            << parameters.velocity_scale << ','
+            << parameters.cluster_separation << ','
+            << parameters.cluster_speed << ','
+            << parameters.disk_thickness << ','
             << body.x << ',' << body.y << ',' << body.z << ','
             << body.vx << ',' << body.vy << ',' << body.vz << ','
             << body.mass << ','
@@ -258,7 +301,9 @@ int main(int argc, char** argv) {
         output
             << "trajectory_id,snapshot_id,time_step,time,dt,body_id,"
             << "particle_count,seed,initial_condition,characteristic_radius,"
-            << "total_mass,epsilon,x,y,z,vx,vy,vz,mass,ax,ay,az\n";
+            << "total_mass,epsilon,position_scale,velocity_scale,"
+            << "cluster_separation,cluster_speed,disk_thickness,"
+            << "x,y,z,vx,vy,vz,mass,ax,ay,az\n";
 
         std::size_t trajectory_id = 0;
         std::size_t global_snapshot_id = 0;
@@ -269,12 +314,18 @@ int main(int argc, char** argv) {
                  trajectory < options.trajectories_per_count;
                  ++trajectory) {
                 const std::uint64_t seed = options.base_seed + trajectory_id;
-                nbody::Bodies bodies = nbody::initialize_bodies(body_count, seed);
+                nbody::Bodies bodies = nbody::initialize_bodies_for_family(
+                    body_count,
+                    seed,
+                    options.family,
+                    options.initial_condition_parameters
+                );
 
                 std::cout
                     << "trajectory " << trajectory_id
                     << ": bodies=" << body_count
-                    << ", seed=" << seed << '\n';
+                    << ", seed=" << seed
+                    << ", family=" << nbody::to_string(options.family) << '\n';
 
                 for (std::size_t snapshot = 0;
                      snapshot < options.snapshots;
@@ -313,6 +364,8 @@ int main(int argc, char** argv) {
                         options.dt,
                         seed,
                         options.epsilon,
+                        options.family,
+                        options.initial_condition_parameters,
                         bodies,
                         tiled
                     );
@@ -336,7 +389,7 @@ int main(int argc, char** argv) {
         }
 
         std::cout
-            << "pilot dataset written to: " << options.output.string() << '\n'
+            << "dataset shard written to: " << options.output.string() << '\n'
             << "trajectories: " << trajectory_id << '\n'
             << "snapshots: " << global_snapshot_id << '\n'
             << "maximum naive/tiled acceleration difference: "

@@ -11,6 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(nbody_core
     src/config.cpp
+    src/initial_conditions.cpp
     src/initialization.cpp
     src/serial.cpp
     src/openmp.cpp
@@ -65,6 +66,9 @@ if(NBODY_BUILD_TESTS)
     add_executable(test_initialization tests/test_initialization.cpp)
     target_link_libraries(test_initialization PRIVATE nbody_core)
     add_test(NAME deterministic_initialization COMMAND test_initialization)
+    add_executable(test_initial_conditions tests/test_initial_conditions.cpp)
+    target_link_libraries(test_initial_conditions PRIVATE nbody_core)
+    add_test(NAME initial_condition_families COMMAND test_initial_conditions)
     if(NBODY_ENABLE_CUDA)
         add_executable(test_cuda_naive tests/test_cuda_naive.cpp)
         target_link_libraries(test_cuda_naive PRIVATE nbody_cuda)

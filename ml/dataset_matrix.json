@@ -1,0 +1,126 @@
+{
+  "dataset_name": "nbody_force_candidate_v1",
+  "status": "pre_serial_validation",
+  "global": {
+    "snapshots": 8,
+    "stride": 25,
+    "dt": 0.001,
+    "epsilon": 0.01,
+    "block_size": 64,
+    "verify_every": 10,
+    "verification_tolerance": 1e-10,
+    "initial_condition_parameters": {
+      "position_scale": 1.0,
+      "velocity_scale": 0.01,
+      "cluster_separation": 4.0,
+      "cluster_speed": 0.2,
+      "disk_thickness": 0.05
+    }
+  },
+  "shards": [
+    {
+      "split": "train",
+      "evaluation_group": "in_distribution",
+      "family": "uniform_cube",
+      "body_counts": [128, 256, 512, 1024, 2048],
+      "trajectories_per_count": 10,
+      "seed_start": 100000
+    },
+    {
+      "split": "train",
+      "evaluation_group": "in_distribution",
+      "family": "plummer_sphere",
+      "body_counts": [128, 256, 512, 1024, 2048],
+      "trajectories_per_count": 10,
+      "seed_start": 110000
+    },
+    {
+      "split": "train",
+      "evaluation_group": "in_distribution",
+      "family": "two_cluster_collision",
+      "body_counts": [128, 256, 512, 1024, 2048],
+      "trajectories_per_count": 10,
+      "seed_start": 120000
+    },
+    {
+      "split": "validation",
+      "evaluation_group": "unseen_seeds",
+      "family": "uniform_cube",
+      "body_counts": [128, 256, 512, 1024, 2048],
+      "trajectories_per_count": 2,
+      "seed_start": 200000
+    },
+    {
+      "split": "validation",
+      "evaluation_group": "unseen_seeds",
+      "family": "plummer_sphere",
+      "body_counts": [128, 256, 512, 1024, 2048],
+      "trajectories_per_count": 2,
+      "seed_start": 210000
+    },
+    {
+      "split": "validation",
+      "evaluation_group": "unseen_seeds",
+      "family": "two_cluster_collision",
+      "body_counts": [128, 256, 512, 1024, 2048],
+      "trajectories_per_count": 2,
+      "seed_start": 220000
+    },
+    {
+      "split": "test",
+      "evaluation_group": "interpolation_counts",
+      "family": "uniform_cube",
+      "body_counts": [768, 1536],
+      "trajectories_per_count": 4,
+      "seed_start": 300000
+    },
+    {
+      "split": "test",
+      "evaluation_group": "interpolation_counts",
+      "family": "plummer_sphere",
+      "body_counts": [768, 1536],
+      "trajectories_per_count": 4,
+      "seed_start": 310000
+    },
+    {
+      "split": "test",
+      "evaluation_group": "interpolation_counts",
+      "family": "two_cluster_collision",
+      "body_counts": [768, 1536],
+      "trajectories_per_count": 4,
+      "seed_start": 320000
+    },
+    {
+      "split": "test",
+      "evaluation_group": "extrapolation_count",
+      "family": "uniform_cube",
+      "body_counts": [3072],
+      "trajectories_per_count": 4,
+      "seed_start": 400000
+    },
+    {
+      "split": "test",
+      "evaluation_group": "extrapolation_count",
+      "family": "plummer_sphere",
+      "body_counts": [3072],
+      "trajectories_per_count": 4,
+      "seed_start": 410000
+    },
+    {
+      "split": "test",
+      "evaluation_group": "extrapolation_count",
+      "family": "two_cluster_collision",
+      "body_counts": [3072],
+      "trajectories_per_count": 4,
+      "seed_start": 420000
+    },
+    {
+      "split": "test",
+      "evaluation_group": "held_out_family",
+      "family": "rotating_disk",
+      "body_counts": [256, 1024, 2048],
+      "trajectories_per_count": 4,
+      "seed_start": 500000
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-# Pilot ML dataset
+# ML datasets
 
 The pilot dataset uses the validated FP64 tiled CUDA solver for acceleration
 labels. Every sampled snapshot can also be checked against naïve CUDA. This is
@@ -39,11 +39,42 @@ The splitter assigns complete trajectories to exactly one split. It never
 mixes rows or snapshots from the same trajectory across training, validation,
 and testing.
 
-Before producing the final dataset:
+## Candidate full dataset
+
+The fixed matrix in `ml/dataset_matrix.json` adds uniform cubes, Plummer-like
+spheres, and colliding clusters to training. Validation uses unseen seeds, while
+testing contains unseen particle counts and a completely held-out rotating-disk
+family. Splits are assigned before generation, so trajectories cannot leak
+between them.
+
+Preview the matrix without generating data:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\generate_full_dataset.py --dry-run
+```
+
+Generate every raw CUDA shard, then validate and convert it to compressed
+Parquet:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\generate_full_dataset.py
+.\.venv\Scripts\python.exe .\ml\prepare_full_dataset.py
+```
+
+`prepare_full_dataset.py` checks every snapshot, writes a snapshot index, and
+fits normalization statistics using only the training split. Use
+`SnapshotDataset` from `ml/dataset.py` to retrieve complete variable-size
+snapshots for a GNN.
+
+This is intentionally named a **candidate** full dataset. Its labels are FP64
+tiled CUDA results sampled against naïve FP64 CUDA, but the metadata remains
+`pre_serial_validation` and `serial_validated: false`. When the independent CPU
+solver is added, a representative subset must be compared against it before
+the dataset is frozen for final experiments.
+
+Before freezing the final dataset:
 
 1. validate a representative CUDA label sample against the independent serial
    implementation;
-2. add additional initial-condition families;
-3. include held-out particle counts and seeds;
-4. define and store the final normalization scales;
-5. replace CSV with a more compact format if dataset size becomes large.
+2. review the matrix size and physical parameter ranges;
+3. record the final code commit, compiler, CUDA, and GPU metadata.
