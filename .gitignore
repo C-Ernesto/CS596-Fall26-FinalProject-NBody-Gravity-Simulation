@@ -39,6 +39,7 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+/.matplotlib/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
