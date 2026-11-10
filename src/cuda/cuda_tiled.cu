@@ -173,8 +173,14 @@ namespace nbody {
         std::size_t steps,
         double dt,
         double epsilon,
-        int block_size
+        int block_size,
+        CudaTiming* timing
     ) {
+        // initialize timing
+        if (timing != nullptr) {
+            *timing = CudaTiming{};
+        }
+        
         // copy initial bodies
         Bodies final_bodies = initial_bodies;
 

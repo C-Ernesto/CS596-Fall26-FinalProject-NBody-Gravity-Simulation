@@ -10,6 +10,15 @@ namespace nbody {
 using Bodies = std::vector<Body>;
 using Accelerations = std::vector<Acceleration>;
 
+struct CudaTiming {
+    double allocation_ms{};
+    double host_to_device_ms{};
+    double kernel_ms{};
+    double device_to_host_ms{};
+    double cleanup_ms{};
+    double total_ms{};
+};
+
 Bodies initialize_bodies(std::size_t count, std::uint64_t seed);
 
 // Backend extension points. The force calculations are the next milestone.
@@ -33,7 +42,8 @@ Bodies simulate_cuda_naive(
     std::size_t steps,
     double dt,
     double epsilon,
-    int block_size
+    int block_size,
+    CudaTiming* timing = nullptr
 );
 
 Bodies simulate_cuda_tiled(
@@ -41,7 +51,8 @@ Bodies simulate_cuda_tiled(
     std::size_t steps,
     double dt,
     double epsilon,
-    int block_size
+    int block_size,
+    CudaTiming* timing = nullptr
 );
 
 }  // namespace nbody
