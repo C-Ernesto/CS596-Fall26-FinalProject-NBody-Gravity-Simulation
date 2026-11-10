@@ -115,50 +115,61 @@ int main() {
         }
 
         const double epsilon = 0.01;
+        const int block_sizes[] = {64, 256};
 
-        nbody::Accelerations test_acc_257 = nbody::compute_acceleration_cuda_naive(test_bodies_257, epsilon, 256);
+        for (const int block_size : block_sizes) {
+            nbody::Accelerations test_acc_257 =
+                nbody::compute_acceleration_cuda_naive(
+                    test_bodies_257,
+                    epsilon,
+                    block_size
+                );
 
-        // check acceleration size is 257
-        if (test_acc_257.size() != 257) {
-            std::cerr << "Expected 257 accelerations, but received "
-                    << test_acc_257.size() << '\n';
-            return 1;
-        }
-
-        double total_ax = 0.0, total_ay = 0.0, total_az = 0.0;
-
-        for (const nbody::Acceleration& acc : test_acc_257) {
-            // check each acceleration value is finite
-            if (!std::isfinite(acc.x) || !std::isfinite(acc.y) || !std::isfinite(acc.z)) {
-                std::cerr << "Found a non-finite acceleration\n";
+            // check acceleration size is 257
+            if (test_acc_257.size() != 257) {
+                std::cerr << "Expected 257 accelerations, but received "
+                        << test_acc_257.size()
+                        << " using block size " << block_size << '\n';
                 return 1;
             }
 
-            //sum all accelerations components
-            total_ax += acc.x;
-            total_ay += acc.y;
-            total_az += acc.z;
+            double total_ax = 0.0, total_ay = 0.0, total_az = 0.0;
 
+            for (const nbody::Acceleration& acc : test_acc_257) {
+                // check each acceleration value is finite
+                if (!std::isfinite(acc.x) || !std::isfinite(acc.y) || !std::isfinite(acc.z)) {
+                    std::cerr << "Found a non-finite acceleration using block size "
+                              << block_size << '\n';
+                    return 1;
+                }
+
+                //sum all accelerations components
+                total_ax += acc.x;
+                total_ay += acc.y;
+                total_az += acc.z;
+
+            }
+
+            // check all accelerations totals are 0
+            const bool momentum_conserved = approximately_equal(total_ax, 0.0, 1e-9) &&
+                                            approximately_equal(total_ay, 0.0, 1e-9) &&
+                                            approximately_equal(total_az, 0.0, 1e-9);
+
+            if (!momentum_conserved) {
+                std::cerr
+                    << "Unexpected acceleration results using block size "
+                    << block_size << ":\n"
+                    << "total acceleration: ("
+                    << total_ax << ", "
+                    << total_ay << ", "
+                    << total_az << ")\n";
+
+                return 1;
+            }
+
+            std::cout << "CUDA naive 257 test passed with block size "
+                      << block_size << '\n';
         }
-
-        // check all accelerations totals are 0
-        const bool momentum_conserved = approximately_equal(total_ax, 0.0, 1e-9) &&
-                                        approximately_equal(total_ay, 0.0, 1e-9) &&
-                                        approximately_equal(total_az, 0.0, 1e-9);
-
-        if (!momentum_conserved) {
-            std::cerr
-                << "Unexpected acceleration results:\n"
-                << "total acceleration: ("
-                << total_ax << ", "
-                << total_ay << ", "
-                << total_az << ")\n";
-
-            return 1;
-        }
-        
-        std::cout << "CUDA naive 257 test passed\n";
-
     }
 
     // ============================================================

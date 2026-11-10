@@ -352,10 +352,11 @@ int main() {
         const double epsilon = 0.01;
         const std::size_t steps = 5;
         const double dt = 0.001;
-        const int block_size = 256;
+        const int block_sizes[] = {64, 256};
 
-        const nbody::Bodies final_bodies_naive = nbody::simulate_cuda_naive(initial_bodies_257, steps, dt, epsilon, block_size);
-        const nbody::Bodies final_bodies_tiled = nbody::simulate_cuda_tiled(initial_bodies_257, steps, dt, epsilon, block_size);
+        for (const int block_size : block_sizes) {
+            const nbody::Bodies final_bodies_naive = nbody::simulate_cuda_naive(initial_bodies_257, steps, dt, epsilon, block_size);
+            const nbody::Bodies final_bodies_tiled = nbody::simulate_cuda_tiled(initial_bodies_257, steps, dt, epsilon, block_size);
 
         // check naive bodies size is 257
         if (final_bodies_naive.size() != 257) {
@@ -441,7 +442,9 @@ int main() {
             }
         }
         
-        std::cout << "CUDA tiled 257 body simulation passed\n";
+            std::cout << "CUDA tiled 257 body simulation passed with block size "
+                      << block_size << '\n';
+        }
     }
 
     return 0;
