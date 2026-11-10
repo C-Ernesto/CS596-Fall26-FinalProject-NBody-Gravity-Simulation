@@ -24,7 +24,7 @@ foreach ($type in $implementations) {
             --bodies $count `
             --steps 10 `
             --repetitions 5 `
-            --block-size 256 `
+            --block-size 64 `
             --output $outputPath
 
         if ($LASTEXITCODE -ne 0) {

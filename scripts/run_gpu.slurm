@@ -16,5 +16,5 @@ export OMP_PROC_BIND=true
 export OMP_PLACES=cores
 
 srun ./build/nbody --implementation cuda_tiled --bodies 8192 --steps 100 \
-    --block-size 256
+    --block-size 64
 

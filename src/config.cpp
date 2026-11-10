@@ -90,8 +90,8 @@ void print_help(const char* program_name) {
         << "  --epsilon VALUE     Softening value (default: 0.01)\n"
         << "  --seed N            Initialization seed (default: 12345)\n"
         << "  --threads N         OpenMP thread count\n"
-        << "  --block-size N      CUDA block size (default: 256)\n"
-        << "  --output FILE       Future CSV output path\n"
+        << "  --block-size N      CUDA block size (default: 64)\n"
+        << "  --output FILE       Append benchmark results to CSV\n"
         << "  --repetitions N     Timed repetitions (default: 5)\n";
 }
 

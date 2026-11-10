@@ -17,7 +17,7 @@ struct Config {
     double epsilon{0.01};
     std::uint64_t seed{12345};
     int threads{0};
-    int block_size{256};
+    int block_size{64};
     std::string output{};
 };
 
