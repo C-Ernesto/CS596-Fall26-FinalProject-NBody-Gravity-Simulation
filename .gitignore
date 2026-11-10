@@ -27,9 +27,18 @@ CMakeUserPresets.json
 # Generated benchmark and visualization output (keep placeholders)
 /results/*
 !/results/.gitkeep
+!/results/cuda_optimized_scaling.csv
+!/results/cuda_optimized_scaling_summary.csv
+!/results/cuda_block_sweep_refined.csv
+!/results/cuda_block_sweep_refined_summary.csv
+!/results/cuda_block_sweep_refined_best.csv
 /data/
 /visualization/output/*
 !/visualization/output/.gitkeep
+!/visualization/output/cuda_optimized_scaling.png
+!/visualization/output/cuda_optimized_tiled_speedup.png
+!/visualization/output/cuda_optimized_timing_breakdown.png
+!/visualization/output/cuda_block_sweep_refined.png
 
 # Scheduler and runtime output
 slurm-*.out

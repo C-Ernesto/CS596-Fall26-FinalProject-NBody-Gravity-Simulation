@@ -1,112 +1,528 @@
-# Machine-Learned Force Approximation for N-Body Simulation
+# CUDA N-Body Simulation and Machine-Learned Force Approximation
 
-This project compares exact direct gravitational N-body simulation on CPUs and GPUs, then tests whether a hierarchical machine-learning model can predict each particle's acceleration faster than direct all-pairs force calculation.
+This project studies the performance of gravitational N-body simulation on CPUs and GPUs and asks whether a machine-learning surrogate can eventually approximate the expensive all-pairs force calculation. The exact direct method requires every body to interact with every other body, so one force evaluation is O(N²). The project currently has working naïve and shared-memory-tiled CUDA implementations, a velocity-Verlet integrator, performance analysis tools, four initial-condition families, and a complete candidate ML dataset pipeline.
 
-The exact O(N²) implementations will include serial C++, OpenMP, naïve CUDA, and shared-memory tiled CUDA. Their FP64 accelerations provide the ground truth for training and evaluating the learned model.
+The serial CPU, OpenMP CPU, and learned-force model are the main remaining components. Until an independent serial FP64 implementation validates a representative sample of the generated labels, the dataset is deliberately described as a **candidate dataset**, not a frozen final dataset.
 
-The full research and benchmarking plan is in [`N-Body_CPU_GPU_Project_Plan.md`](N-Body_CPU_GPU_Project_Plan.md).
+## Research questions
 
-## Research idea
+The completed and planned work is organized around four questions:
 
-A neural network applied to every particle pair would still be O(N²) and would probably be slower than the analytical gravity equation. The proposed model therefore uses a sparse hierarchical graph:
+1. At what particle count does exact CUDA become faster than exact serial and OpenMP CPU implementations?
+2. How much does shared-memory tiling improve the CUDA force calculation?
+3. Can a sparse hierarchical model predict each body's acceleration accurately without explicitly evaluating every pair?
+4. If the learned model is accurate enough, is its complete preprocessing and inference pipeline actually faster than exact CPU or CUDA force evaluation?
 
-- particle nodes represent nearby interactions;
-- spatial aggregate nodes summarize distant groups of particles;
-- physics-informed messages use relative positions and masses; and
-- the model outputs one acceleration vector for every particle.
-
-The project will compare exact and learned methods on both CPU and GPU. It will measure end-to-end runtime, scaling with particle count, one-step acceleration error, trajectory error, energy drift, momentum drift, and generalization to unseen systems. A hybrid version may compute nearby interactions exactly while learning only the far-field contribution.
-
-## Important limitation
-
-The model is an approximation to a physical law that is already known. Its value must come from avoiding most pairwise interactions, not from replacing a cheap force equation with a more expensive neural network. A learned speedup counts only when the complete preprocessing, graph construction, transfer, and inference time is lower while the resulting simulation stays within a stated error tolerance.
-
-Classical Barnes–Hut force approximation is a strongly recommended comparison if the schedule permits.
+The ML model must reduce the number of interactions. A neural network applied to every particle pair would remain O(N²) and would likely do more work than the analytical gravity equation.
 
 ## Current status
 
-The repository currently provides:
+| Component | Status |
+|---|---|
+| Deterministic body initialization | Implemented and tested |
+| Uniform-cube initial conditions | Implemented and tested |
+| Plummer-like sphere | Implemented and tested |
+| Two-cluster collision | Implemented and tested |
+| Rotating disk | Implemented and tested |
+| Naïve FP64 CUDA force calculation | Implemented and tested |
+| Shared-memory tiled FP64 CUDA force calculation | Implemented and tested |
+| CUDA velocity-Verlet integration | Implemented and tested |
+| Detailed CUDA timing and benchmark CSV output | Implemented |
+| CUDA scaling and block-size analyses | Completed on the development machine |
+| Candidate ML dataset generation and loading | Implemented; dataset generated locally |
+| Serial CPU force calculation | Not implemented yet |
+| OpenMP force calculation | Not implemented yet |
+| CPU/GPU crossover analysis | Waiting for serial/OpenMP implementations |
+| Hierarchical learned-force model | Planned, not implemented |
+| CUDA labels validated against independent CPU FP64 | Waiting for serial implementation |
 
-- a CMake-based C++17 project;
-- shared body and simulation data structures;
-- deterministic particle initialization;
-- command-line parsing;
-- extension points for serial, OpenMP, and CUDA force backends;
-- CUDA source placeholders;
-- one deterministic-initialization test; and
-- starter Slurm, benchmark, result, and visualization directories.
+## Physical and numerical model
 
-The gravitational force calculation, velocity-Verlet integration, dataset pipeline, and learned model are not implemented yet.
+For each body `i`, the direct solver evaluates the softened gravitational acceleration
 
-## Build locally
-
-Requirements: CMake 3.20+ and a C++17 compiler. OpenMP is used automatically when available.
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
-ctest --test-dir build --output-on-failure
+```text
+a_i = G * sum(j != i) m_j * (r_j - r_i)
+      / (|r_j - r_i|^2 + epsilon^2)^(3/2)
 ```
 
-Run the starter executable:
+The code uses normalized units with `G = 1`, FP64 state and force calculations, configurable softening `epsilon`, and velocity-Verlet time integration. Softening prevents singular accelerations during extremely close encounters.
 
-```bash
-./build/nbody --implementation serial --bodies 1024 --steps 100 --seed 12345
+Two exact GPU backends are available:
+
+- `cuda_naive`: each GPU thread evaluates one target body and reads all source bodies from global memory.
+- `cuda_tiled`: source bodies are loaded into shared-memory tiles and reused by every thread in a block.
+
+Both methods still perform O(N²) arithmetic. Tiling changes memory reuse and constant factors, not asymptotic complexity.
+
+## Requirements
+
+### CUDA-enabled build
+
+- An NVIDIA GPU supported by the installed CUDA toolkit
+- NVIDIA display/compute driver
+- CUDA toolkit, including `nvcc`
+- CMake 3.20 or newer
+- A C++17 compiler supported by the installed CUDA toolkit
+- Python 3 with `venv` for analysis and dataset preparation
+
+The completed local experiments used:
+
+- Windows `10.0.26200`
+- NVIDIA GeForce RTX 3060 Laptop GPU, 6 GB, compute capability 8.6
+- CUDA toolkit 12.8
+- NVIDIA driver 595.97
+- Visual Studio 2022/MSVC through MSBuild 17.14
+- CMake 4.4.4
+- Python 3.13.1
+
+Runtime measurements are machine-specific. New hardware should rerun the benchmark scripts instead of treating the included timings as universal.
+
+### Windows installation
+
+Install the following before configuring the project:
+
+1. Visual Studio 2022 with the **Desktop development with C++** workload and a Windows SDK.
+2. CMake, with `cmake` available in PowerShell.
+3. The NVIDIA driver and CUDA toolkit. The CUDA installer must be able to find a supported Visual Studio C++ toolset.
+4. Python 3.
+
+Verify the main tools:
+
+```powershell
+cmake --version
+nvcc --version
+nvidia-smi
+python --version
 ```
 
-On a multi-configuration Windows build, the executable may be under `build/Release/`.
+If CMake reports `No CUDA toolset found`, first verify that `nvcc --version` works, then confirm that Visual Studio's C++ workload was installed and that the CUDA toolkit supports that compiler version. Delete or use a new CMake build directory after fixing the installation so CMake performs CUDA detection again.
 
-## CUDA build
+### Linux or a cluster such as CARC
 
-CUDA is disabled by default so the CPU skeleton builds without a CUDA toolkit:
+Load site-provided compiler, CUDA, CMake, and Python modules. Exact module names vary by cluster, so inspect the available versions first:
+
+```bash
+module spider cuda
+module spider cmake
+module spider gcc
+```
+
+Then load a mutually compatible set, for example:
+
+```bash
+module load gcc
+module load cuda
+module load cmake
+module load python
+```
+
+The files `scripts/run_cpu.slurm` and `scripts/run_gpu.slurm` are templates. Before submitting them, add the correct CARC account, partition/constraint, and module commands. The CPU job will not run a simulation until the serial/OpenMP backends are implemented.
+
+## Get the code and Python environment
+
+From PowerShell in the repository root:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+On Linux/macOS:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+The Python dependencies are pandas, matplotlib, seaborn, and PyArrow. PyArrow is used for the compressed, model-ready dataset.
+
+## Build
+
+### Windows CUDA build
+
+The scripts in this repository expect the Windows build directory to be named `build-cuda-explicit`:
+
+```powershell
+cmake -S . -B build-cuda-explicit -DNBODY_ENABLE_CUDA=ON
+cmake --build build-cuda-explicit --config Release
+```
+
+The executables are written to:
+
+```text
+build-cuda-explicit/Release/nbody.exe
+build-cuda-explicit/Release/nbody_generate_dataset.exe
+```
+
+### Linux CUDA build
 
 ```bash
 cmake -S . -B build-cuda -DCMAKE_BUILD_TYPE=Release -DNBODY_ENABLE_CUDA=ON
-cmake --build build-cuda --config Release
+cmake --build build-cuda --parallel
 ```
 
-CARC module names and Slurm settings should be updated after checking the current cluster environment and course allocation.
+### CPU-only build
 
-## Planned ML workflow
+A CPU-only configuration can build the shared infrastructure and initialization tests:
 
-1. Generate exact FP64 particle accelerations using the validated simulator.
-2. Build train, validation, and test splits grouped by complete simulation seed or trajectory.
-3. Construct sparse hierarchical particle graphs.
-4. Train a PyTorch model to predict per-particle acceleration.
-5. Integrate predicted acceleration using the same velocity-Verlet method.
-6. Compare exact and learned force evaluation on CPU and GPU.
-7. Test unseen particle counts, seeds, and initial-condition families.
+```powershell
+cmake -S . -B build
+cmake --build build --config Release
+```
 
-The learned model will normally run in FP32. Exact FP64 results remain the reference.
+The `serial` and `openmp` command-line choices currently report that CPU simulation is not implemented. A CPU-only build is therefore not yet a usable simulation backend.
+
+## Run the tests
+
+Windows:
+
+```powershell
+ctest --test-dir build-cuda-explicit -C Release --output-on-failure
+```
+
+Linux:
+
+```bash
+ctest --test-dir build-cuda --output-on-failure
+```
+
+The current suite contains four CTest targets:
+
+- deterministic default initialization;
+- deterministic, finite, centered initial-condition families with unit total mass and zero net momentum;
+- naïve CUDA analytical one- and two-body forces, a non-block-aligned 257-body case, velocity-Verlet motion, and timing validation;
+- tiled CUDA analytical and 257-body comparisons against naïve CUDA, including block sizes 64 and 256.
+
+At the time of this README update, all four tests pass.
+
+## Run a simulation
+
+Example tiled CUDA run on Windows:
+
+```powershell
+.\build-cuda-explicit\Release\nbody.exe `
+    --implementation cuda_tiled `
+    --bodies 4096 `
+    --steps 100 `
+    --dt 0.001 `
+    --epsilon 0.01 `
+    --seed 12345 `
+    --block-size 64 `
+    --repetitions 5
+```
+
+Use `cuda_naive` to select the naïve kernel. The program performs a one-step warmup, runs the requested number of timed repetitions, reports the median end-to-end time, and prints the first body's final position.
+
+Append each repetition and its timing breakdown to a CSV file with `--output`:
+
+```powershell
+.\build-cuda-explicit\Release\nbody.exe `
+    --implementation cuda_tiled `
+    --bodies 4096 `
+    --steps 10 `
+    --repetitions 5 `
+    --block-size 64 `
+    --output results\my_cuda_run.csv
+```
+
+The detailed timing columns are allocation, host-to-device transfer, CUDA kernels, device-to-host transfer, cleanup, CUDA-wrapper total, and outer end-to-end time. Run `nbody.exe --help` for all options.
+
+## CUDA performance experiments
+
+### Methodology
+
+The finalized local scaling experiment used both CUDA implementations with:
+
+- `N = 256, 512, 1024, 2048, 4096, 8192, 16384`;
+- 10 velocity-Verlet steps per timed simulation;
+- one warmup simulation before measurement;
+- five measured repetitions per configuration;
+- median end-to-end runtime as the primary result;
+- fixed seed 12345, `dt = 0.001`, and `epsilon = 0.01`; and
+- CUDA block size 64.
+
+End-to-end time includes allocation, transfers, kernel execution, result retrieval, and cleanup. It is therefore more representative than kernel-only timing.
+
+### Scaling results
+
+| Bodies | Naïve median (ms) | Tiled median (ms) | Naïve / tiled speedup |
+|---:|---:|---:|---:|
+| 256 | 3.307 | 2.327 | 1.421x |
+| 512 | 5.554 | 4.287 | 1.296x |
+| 1,024 | 10.178 | 7.812 | 1.303x |
+| 2,048 | 27.655 | 21.412 | 1.292x |
+| 4,096 | 62.480 | 62.191 | 1.005x |
+| 8,192 | 206.973 | 204.818 | 1.011x |
+| 16,384 | 754.738 | 744.672 | 1.014x |
+
+![CUDA runtime scaling](visualization/output/cuda_optimized_scaling.png)
+
+The tiled kernel produced a 1.29x-1.42x end-to-end speedup from 256 through 2,048 bodies. On this RTX 3060 Laptop GPU the advantage nearly disappeared at 4,096 bodies and above. This shows that shared-memory tiling is helpful, but not automatically better by a large factor at every problem size or on every GPU.
+
+![Tiled CUDA speedup](visualization/output/cuda_optimized_tiled_speedup.png)
+
+### Timing breakdown
+
+![CUDA timing breakdown](visualization/output/cuda_optimized_timing_breakdown.png)
+
+At small N, allocation, cleanup, transfers, and wrapper overhead are visible portions of total time. Kernel execution becomes dominant as N grows: for both implementations it accounts for more than 98% of CUDA-wrapper time by N = 4096 and about 99.8% by N = 16384. This is why transfer optimization alone cannot solve the large-N O(N²) cost.
+
+### CUDA block-size sweep
+
+The refined sweep tested block sizes 32, 64, 96, and 128 at N = 1024, 4096, and 16384, with five repetitions per point.
+
+![CUDA block-size sweep](visualization/output/cuda_block_sweep_refined.png)
+
+The fastest block size was not universal:
+
+| Implementation | N = 1,024 | N = 4,096 | N = 16,384 |
+|---|---:|---:|---:|
+| Naïve | 64 | 96 | 64 |
+| Tiled | 64 | 32 | 96 |
+
+Block size 64 remains the project default because it is a simple common setting, was best at N = 1024 for both methods, and performed well at the largest tested size. It is not claimed to be optimal for every N; performance-sensitive experiments should sweep block size on the target GPU.
+
+### Reproduce the CUDA analysis
+
+Run the standard scaling matrix:
+
+```powershell
+.\scripts\run_cuda_benchmarks.ps1
+```
+
+The script appends to `results/cuda_optimized_scaling.csv`; move or remove an existing file first if a clean experiment is required. Generate the published-style summary and plots:
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\plot_results.py `
+    --input results\cuda_optimized_scaling.csv `
+    --summary-output results\cuda_optimized_scaling_summary.csv `
+    --output visualization\output\cuda_optimized_scaling.png `
+    --breakdown-output visualization\output\cuda_optimized_timing_breakdown.png `
+    --speedup-output visualization\output\cuda_optimized_tiled_speedup.png
+```
+
+Reproduce the refined block-size sweep and plot:
+
+```powershell
+.\scripts\run_cuda_block_sweep.ps1 `
+    -BodyCounts 1024,4096,16384 `
+    -BlockSizes 32,64,96,128 `
+    -Steps 10 `
+    -Repetitions 5 `
+    -OutputPath results\cuda_block_sweep_refined.csv `
+    -Overwrite
+
+.\.venv\Scripts\python.exe .\scripts\plot_block_sweep.py `
+    --input results\cuda_block_sweep_refined.csv `
+    --summary-output results\cuda_block_sweep_refined_summary.csv `
+    --best-output results\cuda_block_sweep_refined_best.csv `
+    --output visualization\output\cuda_block_sweep_refined.png
+```
+
+The final raw measurements, summaries, and plots used above are versioned in `results/` and `visualization/output/`. Other generated experiment files remain ignored by Git.
+
+## Candidate ML dataset
+
+### Purpose
+
+The learned model will receive a complete particle state and predict the acceleration `(ax, ay, az)` of every body. The current direction is a sparse hierarchical graph or hybrid near-field/far-field model; a fully connected GNN would preserve the O(N²) interaction count and is only suitable as a small-N baseline.
+
+The dataset labels are exact direct-summation FP64 accelerations from tiled CUDA. Selected snapshots are checked against naïve FP64 CUDA during generation. All sampled comparisons in the completed candidate generation had a maximum naïve/tiled acceleration difference of zero.
+
+### Initial-condition families
+
+- `uniform_cube`: random positions in a cube with small random velocities;
+- `plummer_sphere`: a truncated Plummer-like spherical distribution;
+- `two_cluster_collision`: two separated Plummer-like clusters moving toward each other; and
+- `rotating_disk`: a thin rotating disk used only as a held-out-family test.
+
+Each generated system has positive equal masses summing to one, a centered center of mass, and zero net momentum.
+
+### Fixed dataset matrix
+
+The complete matrix is stored in `ml/dataset_matrix.json`.
+
+| Split/evaluation | Families | Particle counts | Trajectories per family/count |
+|---|---|---|---:|
+| Train | cube, Plummer, two-cluster | 128, 256, 512, 1024, 2048 | 10 |
+| Validation: unseen seeds | cube, Plummer, two-cluster | 128, 256, 512, 1024, 2048 | 2 |
+| Test: interpolation counts | cube, Plummer, two-cluster | 768, 1536 | 4 |
+| Test: extrapolation count | cube, Plummer, two-cluster | 3072 | 4 |
+| Test: held-out family | rotating disk | 256, 1024, 2048 | 4 |
+
+Every trajectory contributes eight snapshots separated by 25 integration steps. Seeds and complete trajectories are disjoint across splits, preventing temporal leakage.
+
+The generated candidate contains:
+
+- 228 trajectories;
+- 1,824 snapshots;
+- 1,765,376 body rows;
+- 1,200 training snapshots;
+- 240 validation snapshots; and
+- 384 test snapshots.
+
+On the development machine, the raw CSV shards occupy about 596 MB and the compressed Parquet copy about 143 MB. Dataset files are ignored by Git and must be generated locally.
+
+### Preview or edit the matrix
+
+Preview the work without generating anything:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\generate_full_dataset.py --dry-run
+```
+
+Edit `ml/dataset_matrix.json` to change families, particle counts, trajectory counts, seeds, snapshot spacing, or physical parameters. Keep seed ranges disjoint.
+
+### Generate the raw dataset
+
+Build the CUDA project first, then run:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\generate_full_dataset.py
+```
+
+On Linux, override the Windows-oriented default generator path:
+
+```bash
+.venv/bin/python ml/generate_full_dataset.py \
+    --generator build-cuda/nbody_generate_dataset
+```
+
+For a rerun that replaces existing shards:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\generate_full_dataset.py --overwrite
+```
+
+The raw output is written to:
+
+```text
+data/raw/candidate_v1/
+├── manifest.csv
+├── metadata.json
+└── one CSV file per split/evaluation/family shard
+```
+
+Generate only one split with `--only-split train`, `--only-split validation`, or `--only-split test`. Run `ml/generate_full_dataset.py --help` for path overrides.
+
+### Validate and prepare the model-ready dataset
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\prepare_full_dataset.py
+```
+
+Use `--overwrite` when replacing an existing processed dataset. The preparation step checks:
+
+- expected row counts;
+- required columns and finite numeric values;
+- positive masses and characteristic scales;
+- family consistency;
+- unique trajectory/snapshot/body keys;
+- complete snapshots; and
+- body IDs exactly covering `0` through `N-1`.
+
+It then writes compressed Parquet shards and supporting metadata:
+
+```text
+data/processed/candidate_v1/
+├── train/
+├── validation/
+├── test/
+├── manifest.csv
+├── metadata.json
+├── normalization.json
+└── snapshot_index.parquet
+```
+
+### Normalization
+
+With characteristic radius `R`, total mass `M`, and `G = 1`, the loader applies:
+
+```text
+position     / R
+velocity     / sqrt(M / R)
+mass         / M
+acceleration / (M / R^2)
+epsilon      / R
+```
+
+Empirical means and standard deviations after physical scaling are fitted using the training split only and stored in `normalization.json`. Validation and test data never influence these statistics.
+
+### Load snapshots in Python
+
+`SnapshotDataset` returns one complete, variable-size N-body snapshot at a time:
+
+```python
+from ml.dataset import SnapshotDataset
+
+dataset = SnapshotDataset(
+    "data/processed/candidate_v1",
+    split="train",
+    normalize=True,
+)
+
+sample = dataset[0]
+print(sample["positions"].shape)      # (N, 3)
+print(sample["velocities"].shape)     # (N, 3)
+print(sample["masses"].shape)         # (N,)
+print(sample["accelerations"].shape)  # (N, 3)
+print(sample["metadata"])
+```
+
+Filter test cases with `evaluation_group="interpolation_counts"`, `"extrapolation_count"`, or `"held_out_family"`.
+
+### Dataset validation status
+
+The current metadata says:
+
+```text
+status: pre_serial_validation
+serial_validated: false
+```
+
+Naïve and tiled CUDA agreement is useful but not fully independent because both implementations run on CUDA and share project data structures. Once the serial FP64 backend is available, a stratified sample covering all families, particle counts, and splits must be compared against it before the dataset is frozen for final ML experiments.
 
 ## Repository layout
 
 ```text
-include/nbody/       Shared C++ headers
-src/                 C++ implementations and program entry point
-src/cuda/            CUDA backend placeholders
-tests/               Correctness tests
-scripts/             Slurm and benchmark helpers
-results/             Generated measurements (ignored by Git)
-visualization/       Simulation and analysis figures
+.
+├── CMakeLists.txt
+├── include/nbody/              C++ data structures and public APIs
+├── src/
+│   ├── cuda/                   naïve and tiled CUDA implementations
+│   ├── generate_dataset.cpp    CUDA acceleration-label writer
+│   ├── initial_conditions.cpp  four deterministic system families
+│   └── main.cpp                simulation and benchmark executable
+├── tests/                      initialization and CUDA correctness tests
+├── scripts/
+│   ├── run_cuda_benchmarks.ps1
+│   ├── run_cuda_block_sweep.ps1
+│   ├── plot_results.py
+│   ├── plot_block_sweep.py
+│   └── *.slurm                 cluster job templates
+├── ml/
+│   ├── dataset_matrix.json     fixed candidate experiment matrix
+│   ├── generate_full_dataset.py
+│   ├── prepare_full_dataset.py
+│   ├── prepare_dataset.py      earlier small-pilot splitter
+│   └── dataset.py              Parquet snapshot loader
+├── results/                    selected versioned results; other output ignored
+├── visualization/output/       selected versioned plots; other output ignored
+└── data/                       generated locally and ignored by Git
 ```
 
-The planned ML additions are:
+## Known limitations and next steps
 
-```text
-ml/
-├── dataset.py
-├── hierarchy.py
-├── model.py
-├── train.py
-├── evaluate.py
-├── run_surrogate.py
-└── models/
-```
+1. Implement and analytically test the serial FP64 force calculation and velocity-Verlet simulation.
+2. Implement OpenMP and measure scaling across thread counts.
+3. Compare serial, OpenMP, naïve CUDA, and tiled CUDA to find the CPU/GPU crossover point.
+4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
+5. Build a small learned-force baseline, followed by a sparse hierarchical or hybrid exact-near/learned-far model.
+6. Evaluate one-step acceleration error, unseen-N and held-out-family generalization, rollout stability, energy drift, momentum drift, and end-to-end inference time.
+7. If time permits, compare against Barnes-Hut so the learned approximation is evaluated against a strong classical O(N log N) method, not only direct summation.
 
-Generated datasets and model checkpoints will be excluded from Git except for small documented examples.
-
-## Suggested next milestone
-
-Implement the exact FP64 serial acceleration calculation and velocity-Verlet integration, then add analytical force and two-body orbit tests. After that reference is correct, add OpenMP and CUDA implementations and use the validated GPU solver to generate ML training labels.
-
+Any ML speedup claim must include graph construction, preprocessing, transfers, and inference. Kernel-only ML timing must not be compared with end-to-end exact-solver timing.
