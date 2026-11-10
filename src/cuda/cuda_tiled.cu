@@ -2,6 +2,7 @@
 
 #include "nbody/simulation.hpp"
 #include <cuda_runtime.h>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <string>
@@ -201,10 +202,14 @@ namespace nbody {
         if (block_size <= 0) {
             throw std::invalid_argument("block size must be positive");
         }
+
+        const auto total_start = std::chrono::steady_clock::now();
         
         // make 2 local pointers
         Body* device_bodies = nullptr;
         Acceleration* device_accelerations = nullptr;
+        cudaEvent_t kernel_start = nullptr;
+        cudaEvent_t kernel_stop = nullptr;
 
         // calculate body and acceleration bytes
         const std::size_t body_bytes = final_bodies.size() * sizeof(Body);
@@ -220,14 +225,32 @@ namespace nbody {
         try
         {
             // malloc for bodies and acceleration
+            const auto allocation_start = std::chrono::steady_clock::now();
             const cudaError_t body_alloc_res = cudaMalloc(reinterpret_cast<void**>(&device_bodies), body_bytes);
             check_cuda(body_alloc_res, "CUDA Malloc for bodies");
             const cudaError_t acc_alloc_res = cudaMalloc(reinterpret_cast<void**>(&device_accelerations), acceleration_bytes);
             check_cuda(acc_alloc_res, "CUDA Malloc for acceleration");
+            const auto allocation_end = std::chrono::steady_clock::now();
+            if (timing != nullptr) {
+                timing->allocation_ms = std::chrono::duration<double, std::milli>(
+                    allocation_end - allocation_start
+                ).count();
+            }
 
             // copy final_bodies to device_bodies
+            const auto host_to_device_start = std::chrono::steady_clock::now();
             const cudaError_t body_copy_res = cudaMemcpy(device_bodies, final_bodies.data(), body_bytes, cudaMemcpyHostToDevice);
             check_cuda(body_copy_res, "CUDA Mem copy for bodies, host to device");
+            const auto host_to_device_end = std::chrono::steady_clock::now();
+            if (timing != nullptr) {
+                timing->host_to_device_ms = std::chrono::duration<double, std::milli>(
+                    host_to_device_end - host_to_device_start
+                ).count();
+            }
+
+            check_cuda(cudaEventCreate(&kernel_start), "create kernel start event");
+            check_cuda(cudaEventCreate(&kernel_stop), "create kernel stop event");
+            check_cuda(cudaEventRecord(kernel_start), "record kernel start event");
 
             // run acceleration kernel
             acceleration_tiled_kernel<<<grid_size, threads_per_block, dynamic_shared_memory_bytes>>>(device_bodies, device_accelerations, final_bodies.size(), epsilon_squared);
@@ -250,14 +273,36 @@ namespace nbody {
 
             }
 
-            const cudaError_t sync_result = cudaDeviceSynchronize();
-            check_cuda(sync_result, "tiled simulation execution");
+            check_cuda(cudaEventRecord(kernel_stop), "record kernel stop event");
+            check_cuda(cudaEventSynchronize(kernel_stop), "wait for tiled simulation kernels");
 
+            float kernel_elapsed_ms = 0.0F;
+            check_cuda(
+                cudaEventElapsedTime(&kernel_elapsed_ms, kernel_start, kernel_stop),
+                "measure tiled simulation kernel time"
+            );
+            if (timing != nullptr) {
+                timing->kernel_ms = static_cast<double>(kernel_elapsed_ms);
+            }
+
+            const auto device_to_host_start = std::chrono::steady_clock::now();
             const cudaError_t copy_body_dev_to_host = cudaMemcpy(final_bodies.data(), device_bodies, body_bytes, cudaMemcpyDeviceToHost);
             check_cuda(copy_body_dev_to_host, "copy final bodies from device to host");
+            const auto device_to_host_end = std::chrono::steady_clock::now();
+            if (timing != nullptr) {
+                timing->device_to_host_ms = std::chrono::duration<double, std::milli>(
+                    device_to_host_end - device_to_host_start
+                ).count();
+            }
         }
         catch(...)
         {
+            if (kernel_start != nullptr) {
+                (void)cudaEventDestroy(kernel_start);
+            }
+            if (kernel_stop != nullptr) {
+                (void)cudaEventDestroy(kernel_stop);
+            }
             if (device_bodies != nullptr) {
                 (void)cudaFree(device_bodies);
             }
@@ -268,10 +313,25 @@ namespace nbody {
             throw;
         }
 
+        const auto cleanup_start = std::chrono::steady_clock::now();
+        const cudaError_t destroy_start_result = cudaEventDestroy(kernel_start);
+        const cudaError_t destroy_stop_result = cudaEventDestroy(kernel_stop);
         const cudaError_t free_bodies_result = cudaFree(device_bodies);
         const cudaError_t free_accelerations_result = cudaFree(device_accelerations);
+        const auto cleanup_end = std::chrono::steady_clock::now();
+        check_cuda(destroy_start_result, "destroy kernel start event");
+        check_cuda(destroy_stop_result, "destroy kernel stop event");
         check_cuda(free_bodies_result, "cudaFree simulation bodies"); // only check after both alloc are freed
         check_cuda(free_accelerations_result, "cudaFree simulation acceleration");
+
+        if (timing != nullptr) {
+            timing->cleanup_ms = std::chrono::duration<double, std::milli>(
+                cleanup_end - cleanup_start
+            ).count();
+            timing->total_ms = std::chrono::duration<double, std::milli>(
+                cleanup_end - total_start
+            ).count();
+        }
 
         return final_bodies;
     }

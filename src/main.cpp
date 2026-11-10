@@ -18,13 +18,23 @@ int main(int argc, char** argv) {
         nbody::Bodies final_bodies;
 
         // lambda function to run simulation
-        auto run_simulation = [&](std::size_t steps) -> nbody::Bodies {
+        auto run_simulation = [&](
+            std::size_t steps,
+            nbody::CudaTiming* timing
+        ) -> nbody::Bodies {
             // switch between CPU or CUDA
             switch (config.implementation) {
                 case nbody::Implementation::cuda_naive : {
                     #ifdef NBODY_HAS_CUDA
                         // call simulate_cuda_naive and assign to final bodies
-                        return nbody::simulate_cuda_naive(bodies, steps, config.dt, config.epsilon, config.block_size);
+                        return nbody::simulate_cuda_naive(
+                            bodies,
+                            steps,
+                            config.dt,
+                            config.epsilon,
+                            config.block_size,
+                            timing
+                        );
                     #else
                         throw std::runtime_error("CUDA support is not enabled");
                     #endif
@@ -32,7 +42,14 @@ int main(int argc, char** argv) {
                 case nbody::Implementation::cuda_tiled : {
                     #ifdef NBODY_HAS_CUDA
                         // call simulate_cuda_tiled and assign to final bodies
-                        return nbody::simulate_cuda_tiled(bodies, steps, config.dt, config.epsilon, config.block_size);
+                        return nbody::simulate_cuda_tiled(
+                            bodies,
+                            steps,
+                            config.dt,
+                            config.epsilon,
+                            config.block_size,
+                            timing
+                        );
                     #else
                         throw std::runtime_error("CUDA support is not enabled");
                     #endif
@@ -45,26 +62,30 @@ int main(int argc, char** argv) {
         };
 
         // run a short CUDA warmup
-        (void)run_simulation(1);
+        (void)run_simulation(1, nullptr);
 
         // get number of repetitions
         const std::size_t repetitions = config.repetitions;
 
         std::vector<double> simulation_times;
         simulation_times.reserve(repetitions);
+        std::vector<nbody::CudaTiming> cuda_timings;
+        cuda_timings.reserve(repetitions);
 
         // run simulation n times
         for (std::size_t i = 0; i < repetitions; i++) {
+            nbody::CudaTiming cuda_timing{};
             // create chrono variable to measure time
             auto simulation_start = std::chrono::steady_clock::now();
             // call simulation
-            final_bodies = run_simulation(config.steps);
+            final_bodies = run_simulation(config.steps, &cuda_timing);
             // simulation end time
             auto simulation_end = std::chrono::steady_clock::now();
             // get simulation time
             std::chrono::duration<double, std::milli> elapsed_time = simulation_end - simulation_start;
             // add time to vector
             simulation_times.push_back(elapsed_time.count());
+            cuda_timings.push_back(cuda_timing);
         }
         
         // get median time
@@ -93,14 +114,23 @@ int main(int argc, char** argv) {
         }
 
         if (!config.output.empty()) {
+            const std::string csv_header =
+                "implementation,bodies,steps,dt,epsilon,seed,threads,"
+                "block_size,repetition,time_ms,allocation_ms,h2d_ms,"
+                "kernel_ms,d2h_ms,cleanup_ms,total_ms";
             bool write_header = true;
             {
-                std::ifstream existing_output(
-                    config.output,
-                    std::ios::binary | std::ios::ate
-                );
+                std::ifstream existing_output(config.output);
                 if (existing_output) {
-                    write_header = existing_output.tellg() == 0;
+                    std::string existing_header;
+                    std::getline(existing_output, existing_header);
+                    write_header = existing_header.empty();
+                    if (!write_header && existing_header != csv_header) {
+                        throw std::runtime_error(
+                            "CSV schema does not match detailed timing output; "
+                            "use a new output file: " + config.output
+                        );
+                    }
                 }
             }
 
@@ -113,9 +143,7 @@ int main(int argc, char** argv) {
 
             csv_output << std::setprecision(17);
             if (write_header) {
-                csv_output
-                    << "implementation,bodies,steps,dt,epsilon,seed,threads,"
-                    << "block_size,repetition,time_ms\n";
+                csv_output << csv_header << '\n';
             }
 
             for (std::size_t i = 0; i < simulation_times.size(); ++i) {
@@ -129,7 +157,13 @@ int main(int argc, char** argv) {
                     << config.threads << ','
                     << config.block_size << ','
                     << (i + 1) << ','
-                    << simulation_times[i] << '\n';
+                    << simulation_times[i] << ','
+                    << cuda_timings[i].allocation_ms << ','
+                    << cuda_timings[i].host_to_device_ms << ','
+                    << cuda_timings[i].kernel_ms << ','
+                    << cuda_timings[i].device_to_host_ms << ','
+                    << cuda_timings[i].cleanup_ms << ','
+                    << cuda_timings[i].total_ms << '\n';
             }
 
             if (!csv_output) {

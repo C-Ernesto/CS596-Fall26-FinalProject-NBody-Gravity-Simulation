@@ -157,8 +157,26 @@ int main() {
         const nbody::Bodies initial_bodies = {{1.0, 2.0, 3.0, 0.5, -0.25, 1.0, 1.0}};
         const std::size_t steps = 10;
         const double dt = 0.1;
+        nbody::CudaTiming timing{};
 
-        const nbody::Bodies test_body_single = nbody::simulate_cuda_tiled(initial_bodies, steps, dt, 0.01, 256);
+        const nbody::Bodies test_body_single = nbody::simulate_cuda_tiled(
+            initial_bodies,
+            steps,
+            dt,
+            0.01,
+            256,
+            &timing
+        );
+
+        const double measured_components =
+            timing.allocation_ms + timing.host_to_device_ms + timing.kernel_ms +
+            timing.device_to_host_ms + timing.cleanup_ms;
+        if (timing.allocation_ms <= 0.0 || timing.host_to_device_ms <= 0.0 ||
+            timing.kernel_ms <= 0.0 || timing.device_to_host_ms <= 0.0 ||
+            timing.cleanup_ms <= 0.0 || timing.total_ms < measured_components) {
+            std::cerr << "CUDA tiled timing breakdown is invalid\n";
+            return 1;
+        }
 
         // check only 1 body is returned
         if (test_body_single.size() != 1) {

@@ -4,7 +4,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $executable = Join-Path $projectRoot "build-cuda-explicit\Release\nbody.exe"
 $resultsDirectory = Join-Path $projectRoot "results"
-$outputPath = Join-Path $resultsDirectory "cuda_scaling.csv"
+$outputPath = Join-Path $resultsDirectory "cuda_detailed_scaling.csv"
 
 $implementations = "cuda_naive", "cuda_tiled"
 $bodyCounts = 256, 512, 1024, 2048, 4096, 8192, 16384

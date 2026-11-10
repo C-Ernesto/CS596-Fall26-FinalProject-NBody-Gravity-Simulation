@@ -21,9 +21,9 @@ import pandas as pd
 import seaborn as sns
 
 
-DEFAULT_INPUT = PROJECT_ROOT / "results" / "cuda_scaling.csv"
-DEFAULT_PLOT = PROJECT_ROOT / "visualization" / "output" / "cuda_scaling.png"
-DEFAULT_SUMMARY = PROJECT_ROOT / "results" / "cuda_scaling_summary.csv"
+DEFAULT_INPUT = PROJECT_ROOT / "results" / "cuda_detailed_scaling.csv"
+DEFAULT_PLOT = PROJECT_ROOT / "visualization" / "output" / "cuda_detailed_scaling.png"
+DEFAULT_SUMMARY = PROJECT_ROOT / "results" / "cuda_detailed_scaling_summary.csv"
 REQUIRED_COLUMNS = {"implementation", "bodies", "time_ms"}
 
 
