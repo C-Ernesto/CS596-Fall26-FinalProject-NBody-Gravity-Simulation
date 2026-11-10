@@ -27,6 +27,7 @@ CMakeUserPresets.json
 # Generated benchmark and visualization output (keep placeholders)
 /results/*
 !/results/.gitkeep
+/data/
 /visualization/output/*
 !/visualization/output/.gitkeep
 
