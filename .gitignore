@@ -32,6 +32,9 @@ CMakeUserPresets.json
 !/results/cuda_block_sweep_refined.csv
 !/results/cuda_block_sweep_refined_summary.csv
 !/results/cuda_block_sweep_refined_best.csv
+!/results/dataset_analysis/
+!/results/dataset_analysis/*.csv
+!/results/dataset_analysis/report.md
 /data/
 /visualization/output/*
 !/visualization/output/.gitkeep
@@ -39,6 +42,8 @@ CMakeUserPresets.json
 !/visualization/output/cuda_optimized_tiled_speedup.png
 !/visualization/output/cuda_optimized_timing_breakdown.png
 !/visualization/output/cuda_block_sweep_refined.png
+!/visualization/output/dataset_analysis/
+!/visualization/output/dataset_analysis/*.png
 
 # Scheduler and runtime output
 slurm-*.out

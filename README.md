@@ -452,6 +452,24 @@ epsilon      / R
 
 Empirical means and standard deviations after physical scaling are fitted using the training split only and stored in `normalization.json`. Validation and test data never influence these statistics.
 
+### Explore and sanity-check the dataset
+
+Run the complete exploratory analysis after preparing the Parquet dataset:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\analyze_dataset.py
+```
+
+The analysis validates all numeric rows, summarizes normalized position, velocity, acceleration, and softening distributions, measures center-of-mass, momentum, and net-force residuals for every snapshot, and examines representative and maximum-acceleration close encounters. It writes tables and a Markdown report to `results/dataset_analysis/` and plots to `visualization/output/dataset_analysis/`.
+
+The current candidate passed all finite-value and completeness checks. Across 1,824 snapshots, the maximum normalized center-of-mass residual was `2.33e-15`, the maximum relative momentum residual was `1.05e-15`, and the maximum relative net-force residual was `2.58e-16`. These are consistent with FP64 roundoff.
+
+![Normalized acceleration distributions](visualization/output/dataset_analysis/normalized_acceleration_ecdf.png)
+
+The acceleration targets are strongly family-dependent and heavy-tailed. Median normalized magnitudes range from about 0.28 for Plummer-like spheres to 1.73 for the held-out rotating disks. The largest target is about 267.6 in a two-cluster training example. Maximum-acceleration snapshot checks associate the extreme labels with close encounters, so they should not simply be discarded; a robust loss or deliberate sample weighting should be tested during training.
+
+![Dataset physical residuals](visualization/output/dataset_analysis/snapshot_residuals.png)
+
 ### Load snapshots in Python
 
 `SnapshotDataset` returns one complete, variable-size N-body snapshot at a time:
@@ -508,6 +526,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 │   ├── dataset_matrix.json     fixed candidate experiment matrix
 │   ├── generate_full_dataset.py
 │   ├── prepare_full_dataset.py
+│   ├── analyze_dataset.py      EDA and physical sanity checks
 │   ├── prepare_dataset.py      earlier small-pilot splitter
 │   └── dataset.py              Parquet snapshot loader
 ├── results/                    selected versioned results; other output ignored

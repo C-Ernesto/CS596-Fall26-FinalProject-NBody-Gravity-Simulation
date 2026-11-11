@@ -66,6 +66,16 @@ fits normalization statistics using only the training split. Use
 `SnapshotDataset` from `ml/dataset.py` to retrieve complete variable-size
 snapshots for a GNN.
 
+Analyze the prepared dataset before training:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\analyze_dataset.py
+```
+
+This produces distribution summaries, snapshot-level conservation residuals,
+close-encounter diagnostics, a Markdown report, and four plots under
+`results/dataset_analysis/` and `visualization/output/dataset_analysis/`.
+
 This is intentionally named a **candidate** full dataset. Its labels are FP64
 tiled CUDA results sampled against naïve FP64 CUDA, but the metadata remains
 `pre_serial_validation` and `serial_validated: false`. When the independent CPU
