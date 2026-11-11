@@ -76,6 +76,18 @@ This produces distribution summaries, snapshot-level conservation residuals,
 close-encounter diagnostics, a Markdown report, and four plots under
 `results/dataset_analysis/` and `visualization/output/dataset_analysis/`.
 
+Install the CUDA-enabled PyTorch dependency and test the tensor pipeline:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r .\requirements-ml.txt
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_torch_dataset.py -v
+```
+
+Use `make_dataloader` from `ml/torch_dataset.py` for shard-aware,
+particle-budgeted variable-size batches. The default force-model features are
+normalized position and mass; velocity remains available separately for the
+integrator and optional ablation studies.
+
 This is intentionally named a **candidate** full dataset. Its labels are FP64
 tiled CUDA results sampled against naïve FP64 CUDA, but the metadata remains
 `pre_serial_validation` and `serial_validated: false`. When the independent CPU

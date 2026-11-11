@@ -30,6 +30,7 @@ The ML model must reduce the number of interactions. A neural network applied to
 | Detailed CUDA timing and benchmark CSV output | Implemented |
 | CUDA scaling and block-size analyses | Completed on the development machine |
 | Candidate ML dataset generation and loading | Implemented; dataset generated locally |
+| PyTorch tensor, batching, and DataLoader pipeline | Implemented and tested |
 | Serial CPU force calculation | Not implemented yet |
 | OpenMP force calculation | Not implemented yet |
 | CPU/GPU crossover analysis | Waiting for serial/OpenMP implementations |
@@ -127,6 +128,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python -m pip install -r requirements-ml.txt
 ```
 
 On Linux/macOS:
@@ -136,9 +138,10 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python -m pip install -r requirements-ml.txt
 ```
 
-The Python dependencies are pandas, matplotlib, seaborn, and PyArrow. PyArrow is used for the compressed, model-ready dataset.
+The base dependencies are pandas, matplotlib, seaborn, and PyArrow. The separate ML requirements file installs the official PyTorch 2.11 CUDA 12.8 build used by this project; it is a large download. For a CPU-only machine or a different CUDA runtime, use the command produced by the [official PyTorch installation selector](https://pytorch.org/get-started/locally/) instead.
 
 ## Build
 
@@ -470,28 +473,41 @@ The acceleration targets are strongly family-dependent and heavy-tailed. Median 
 
 ![Dataset physical residuals](visualization/output/dataset_analysis/snapshot_residuals.png)
 
-### Load snapshots in Python
+### Load variable-size PyTorch batches
 
-`SnapshotDataset` returns one complete, variable-size N-body snapshot at a time:
+`NBodyTorchDataset` converts complete snapshots to tensors. `make_dataloader` concatenates variable-size systems without padding and returns `batch_index` and `ptr` arrays that preserve the exact system boundaries:
 
 ```python
-from ml.dataset import SnapshotDataset
+import torch
 
-dataset = SnapshotDataset(
+from ml.torch_dataset import make_dataloader
+
+loader = make_dataloader(
     "data/processed/candidate_v1",
     split="train",
     normalize=True,
+    max_snapshots=4,
+    max_particles=4096,
 )
 
-sample = dataset[0]
-print(sample["positions"].shape)      # (N, 3)
-print(sample["velocities"].shape)     # (N, 3)
-print(sample["masses"].shape)         # (N,)
-print(sample["accelerations"].shape)  # (N, 3)
-print(sample["metadata"])
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+for batch in loader:
+    inputs = batch["node_features"].to(device, non_blocking=True)
+    targets = batch["accelerations"].to(device, non_blocking=True)
+    batch_index = batch["batch_index"].to(device, non_blocking=True)
+    ptr = batch["ptr"]
+    break
 ```
 
-Filter test cases with `evaluation_group="interpolation_counts"`, `"extrapolation_count"`, or `"held_out_family"`.
+The default node features are normalized `(x, y, z, mass)`. Velocities are still returned separately for integration but are excluded from force-model inputs because Newtonian acceleration does not depend on velocity. Set `include_velocity_features=True` only for an explicit ablation study.
+
+The particle budget prevents a batch containing several large systems from unexpectedly exhausting GPU memory. Batches stay within one Parquet shard, and each shard's batches remain contiguous so the loader can reuse its one-shard cache. Training still shuffles the shard order and the snapshots within each shard. At the start of each epoch, call `loader.batch_sampler.set_epoch(epoch)` to obtain a deterministic new order.
+
+Filter test cases with `evaluation_group="interpolation_counts"`, `"extrapolation_count"`, or `"held_out_family"`. Verify the complete tensor pipeline with:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_torch_dataset.py -v
+```
 
 ### Dataset validation status
 
@@ -527,6 +543,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 │   ├── generate_full_dataset.py
 │   ├── prepare_full_dataset.py
 │   ├── analyze_dataset.py      EDA and physical sanity checks
+│   ├── torch_dataset.py        PyTorch tensors and variable-N batching
 │   ├── prepare_dataset.py      earlier small-pilot splitter
 │   └── dataset.py              Parquet snapshot loader
 ├── results/                    selected versioned results; other output ignored
@@ -540,7 +557,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 2. Implement OpenMP and measure scaling across thread counts.
 3. Compare serial, OpenMP, naïve CUDA, and tiled CUDA to find the CPU/GPU crossover point.
 4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
-5. Build a small learned-force baseline, followed by a sparse hierarchical or hybrid exact-near/learned-far model.
+5. Build a small learned-force baseline using the completed PyTorch input pipeline, followed by a sparse hierarchical or hybrid exact-near/learned-far model.
 6. Evaluate one-step acceleration error, unseen-N and held-out-family generalization, rollout stability, energy drift, momentum drift, and end-to-end inference time.
 7. If time permits, compare against Barnes-Hut so the learned approximation is evaluated against a strong classical O(N log N) method, not only direct summation.
 
