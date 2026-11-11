@@ -1,0 +1,23 @@
+{
+  "dataset": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\data\\processed\\candidate_v1",
+  "output_dir": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_baseline",
+  "figure": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\visualization\\output\\ml_baseline_history.png",
+  "body_counts": [
+    128
+  ],
+  "epochs": 30,
+  "learning_rate": 0.001,
+  "minimum_learning_rate": 1e-05,
+  "weight_decay": 1e-06,
+  "huber_beta": 1.0,
+  "hidden_dim": 64,
+  "hidden_layers": 3,
+  "target_chunk_size": 128,
+  "max_snapshots": 4,
+  "max_particles": 512,
+  "seed": 12345,
+  "device": "auto",
+  "device_used": "cuda",
+  "torch_version": "2.11.0+cu128",
+  "cuda_runtime": "12.8"
+}

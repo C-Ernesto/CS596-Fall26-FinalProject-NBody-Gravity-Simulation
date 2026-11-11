@@ -35,6 +35,10 @@ CMakeUserPresets.json
 !/results/dataset_analysis/
 !/results/dataset_analysis/*.csv
 !/results/dataset_analysis/report.md
+!/results/ml_baseline/
+!/results/ml_baseline/*.csv
+!/results/ml_baseline/*.json
+/results/ml_baseline/*.pt
 /data/
 /visualization/output/*
 !/visualization/output/.gitkeep
@@ -44,6 +48,7 @@ CMakeUserPresets.json
 !/visualization/output/cuda_block_sweep_refined.png
 !/visualization/output/dataset_analysis/
 !/visualization/output/dataset_analysis/*.png
+!/visualization/output/ml_baseline_history.png
 
 # Scheduler and runtime output
 slurm-*.out

@@ -1,0 +1,2 @@
+split,evaluation_group,initial_condition,particle_count,snapshots,mse,mae,mean_relative_vector_error,mean_cosine_similarity,loss,zero_predictor_mse,mse_over_zero_predictor
+test,held_out_family,rotating_disk,256,32,0.6658247004573544,0.45507494794825715,0.28236024733632803,0.9963985346257687,0.21401464671362191,8.87932821114858,0.07498593188855973

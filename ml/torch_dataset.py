@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Collection
 from pathlib import Path
 from typing import Iterator, Sequence
 
@@ -20,6 +21,7 @@ class NBodyTorchDataset(Dataset):
         root: str | Path,
         split: str | None = None,
         evaluation_group: str | None = None,
+        particle_counts: Collection[int] | None = None,
         normalize: bool = True,
         include_velocity_features: bool = False,
         dtype: torch.dtype = torch.float32,
@@ -30,6 +32,7 @@ class NBodyTorchDataset(Dataset):
             root=root,
             split=split,
             evaluation_group=evaluation_group,
+            particle_counts=particle_counts,
             normalize=normalize,
         )
         if len(self.snapshots) == 0:
@@ -191,6 +194,7 @@ def make_dataloader(
     root: str | Path,
     split: str,
     evaluation_group: str | None = None,
+    particle_counts: Collection[int] | None = None,
     normalize: bool = True,
     include_velocity_features: bool = False,
     dtype: torch.dtype = torch.float32,
@@ -206,6 +210,7 @@ def make_dataloader(
         root=root,
         split=split,
         evaluation_group=evaluation_group,
+        particle_counts=particle_counts,
         normalize=normalize,
         include_velocity_features=include_velocity_features,
         dtype=dtype,

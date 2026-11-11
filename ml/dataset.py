@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +18,7 @@ class SnapshotDataset:
         root: str | Path,
         split: str | None = None,
         evaluation_group: str | None = None,
+        particle_counts: Collection[int] | None = None,
         normalize: bool = True,
     ) -> None:
         self.root = Path(root)
@@ -25,6 +27,11 @@ class SnapshotDataset:
             self.index = self.index[self.index["split"] == split]
         if evaluation_group is not None:
             self.index = self.index[self.index["evaluation_group"] == evaluation_group]
+        if particle_counts is not None:
+            allowed_counts = {int(count) for count in particle_counts}
+            if not allowed_counts or any(count <= 0 for count in allowed_counts):
+                raise ValueError("particle_counts must contain positive integers")
+            self.index = self.index[self.index["particle_count"].isin(allowed_counts)]
         self.index = self.index.reset_index(drop=True)
         self.normalize = normalize
         self.normalization = json.loads((self.root / "normalization.json").read_text(encoding="utf-8"))

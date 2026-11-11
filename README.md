@@ -31,6 +31,7 @@ The ML model must reduce the number of interactions. A neural network applied to
 | CUDA scaling and block-size analyses | Completed on the development machine |
 | Candidate ML dataset generation and loading | Implemented; dataset generated locally |
 | PyTorch tensor, batching, and DataLoader pipeline | Implemented and tested |
+| Small-N fully connected force baseline | Implemented, trained, and evaluated |
 | Serial CPU force calculation | Not implemented yet |
 | OpenMP force calculation | Not implemented yet |
 | CPU/GPU crossover analysis | Waiting for serial/OpenMP implementations |
@@ -509,6 +510,46 @@ Filter test cases with `evaluation_group="interpolation_counts"`, `"extrapolatio
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p test_torch_dataset.py -v
 ```
 
+### Small-N pairwise baseline
+
+`PairwiseForceBaseline` is a fully connected, rotation-equivariant correctness baseline. It learns a scalar radial interaction from softened distance, multiplies it by source mass, and sums the resulting displacement messages for each target body. It is translation invariant and rotation equivariant, but still evaluates all directed pairs and remains O(N²); it is not the proposed scalable model.
+
+Train the default baseline on N=128 snapshots from the three training families:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\train_baseline.py --epochs 30
+```
+
+Training uses FP32, Huber loss, AdamW, cosine learning-rate decay, unseen-seed validation, and best-checkpoint selection. The completed RTX 3060 run used 240 training and 48 validation snapshots and finished in about 105 seconds. The best checkpoint was epoch 30:
+
+| Evaluation | MSE | MSE / zero predictor | MAE | Mean relative vector error | Mean direction cosine |
+|---|---:|---:|---:|---:|---:|
+| Unseen seeds, N=128 | 0.1272 | 0.484% | 0.0892 | 13.79% | 0.99787 |
+| Unseen count N=768, trained families | 0.00794 | 0.796% | 0.0482 | 12.07% | 0.99923 |
+| Held-out rotating disk, N=256 | 0.6658 | 7.50% | 0.4551 | 28.24% | 0.99640 |
+
+![Pairwise baseline training history](visualization/output/ml_baseline_history.png)
+
+The model learns acceleration direction very well, but close encounters make magnitude errors and per-epoch MSE volatile. The held-out disk is substantially harder than unseen seeds or unseen N from trained families, confirming that this split tests genuine distribution shift.
+
+Reproduce the evaluations with:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\evaluate_baseline.py `
+    --split validation --body-counts 128 `
+    --output results\ml_baseline\validation_metrics.csv
+
+.\.venv\Scripts\python.exe .\ml\evaluate_baseline.py `
+    --split test --evaluation-group interpolation_counts --body-counts 768 `
+    --output results\ml_baseline\interpolation_768_metrics.csv
+
+.\.venv\Scripts\python.exe .\ml\evaluate_baseline.py `
+    --split test --evaluation-group held_out_family --body-counts 256 `
+    --output results\ml_baseline\heldout_disk_256_metrics.csv
+```
+
+The best checkpoint is saved locally under `results/ml_baseline/best_model.pt` and remains ignored by Git. Configuration, history, summaries, and evaluation tables are retained.
+
 ### Dataset validation status
 
 The current metadata says:
@@ -544,6 +585,9 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 │   ├── prepare_full_dataset.py
 │   ├── analyze_dataset.py      EDA and physical sanity checks
 │   ├── torch_dataset.py        PyTorch tensors and variable-N batching
+│   ├── baseline_model.py       O(N²) equivariant accuracy baseline
+│   ├── train_baseline.py       training and checkpoint selection
+│   ├── evaluate_baseline.py    per-family/count evaluation
 │   ├── prepare_dataset.py      earlier small-pilot splitter
 │   └── dataset.py              Parquet snapshot loader
 ├── results/                    selected versioned results; other output ignored

@@ -1,0 +1,19 @@
+{
+  "checkpoint": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_baseline\\best_model.pt",
+  "checkpoint_epoch": 30,
+  "split": "test",
+  "evaluation_group": "held_out_family",
+  "body_counts": [
+    256
+  ],
+  "snapshots": 32,
+  "overall": {
+    "mse": 0.6658247004573544,
+    "mae": 0.45507494794825715,
+    "mean_relative_vector_error": 0.28236024733632803,
+    "mean_cosine_similarity": 0.9963985346257687,
+    "loss": 0.21401464671362191,
+    "zero_predictor_mse": 8.87932821114858,
+    "mse_over_zero_predictor": 0.07498593188855973
+  }
+}

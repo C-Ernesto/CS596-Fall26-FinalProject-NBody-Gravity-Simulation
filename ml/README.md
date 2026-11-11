@@ -88,6 +88,17 @@ particle-budgeted variable-size batches. The default force-model features are
 normalized position and mass; velocity remains available separately for the
 integrator and optional ablation studies.
 
+Train and evaluate the first N=128 pairwise baseline:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\train_baseline.py --epochs 30
+.\.venv\Scripts\python.exe .\ml\evaluate_baseline.py --split validation --body-counts 128
+```
+
+The baseline is translation invariant and rotation equivariant, but explicitly
+evaluates every pair. It validates the ML pipeline and provides an accuracy
+reference; it is not intended to provide a speedup over the CUDA solver.
+
 This is intentionally named a **candidate** full dataset. Its labels are FP64
 tiled CUDA results sampled against naïve FP64 CUDA, but the metadata remains
 `pre_serial_validation` and `serial_validated: false`. When the independent CPU
