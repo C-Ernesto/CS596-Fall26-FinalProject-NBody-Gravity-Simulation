@@ -1,0 +1,26 @@
+{
+  "best_validation_loss": 0.6213680990040302,
+  "best_epoch": 29,
+  "best_metrics": {
+    "mse": 26.00637059410413,
+    "mae": 0.8641419344478183,
+    "mean_relative_vector_error": 1.01296233634154,
+    "mean_cosine_similarity": 0.7258053670326868,
+    "loss": 0.6213680990040302
+  },
+  "elapsed_seconds": 37.89679049999904,
+  "final_metrics": {
+    "epoch": 30.0,
+    "learning_rate": 1.2711661792704668e-05,
+    "train_mse": 8.648397755954,
+    "train_mae": 0.6024796505769093,
+    "train_mean_relative_vector_error": 0.9797835399707159,
+    "train_mean_cosine_similarity": 0.7388949294885,
+    "train_loss": 0.3662447516495983,
+    "validation_mse": 26.00634141266346,
+    "validation_mae": 0.8643298397461573,
+    "validation_mean_relative_vector_error": 1.0180722773075104,
+    "validation_mean_cosine_similarity": 0.7266461749871572,
+    "validation_loss": 0.6214080471545458
+  }
+}

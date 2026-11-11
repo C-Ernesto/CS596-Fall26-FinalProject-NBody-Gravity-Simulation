@@ -23,6 +23,7 @@ class SnapshotDataset:
     ) -> None:
         self.root = Path(root)
         self.index = pd.read_parquet(self.root / "snapshot_index.parquet")
+        self.particle_counts: set[int] | None = None
         if split is not None:
             self.index = self.index[self.index["split"] == split]
         if evaluation_group is not None:
@@ -31,6 +32,7 @@ class SnapshotDataset:
             allowed_counts = {int(count) for count in particle_counts}
             if not allowed_counts or any(count <= 0 for count in allowed_counts):
                 raise ValueError("particle_counts must contain positive integers")
+            self.particle_counts = allowed_counts
             self.index = self.index[self.index["particle_count"].isin(allowed_counts)]
         self.index = self.index.reset_index(drop=True)
         self.normalize = normalize
@@ -44,7 +46,10 @@ class SnapshotDataset:
     def _read_shard(self, relative_path: str) -> pd.DataFrame:
         path = self.root / relative_path
         if path != self._cached_path:
-            self._cached_frame = pd.read_parquet(path)
+            filters = None
+            if self.particle_counts is not None:
+                filters = [("particle_count", "in", sorted(self.particle_counts))]
+            self._cached_frame = pd.read_parquet(path, filters=filters)
             self._cached_path = path
         assert self._cached_frame is not None
         return self._cached_frame

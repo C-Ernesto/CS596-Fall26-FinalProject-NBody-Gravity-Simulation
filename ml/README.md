@@ -99,6 +99,18 @@ The baseline is translation invariant and rotation equivariant, but explicitly
 evaluates every pair. It validates the ML pipeline and provides an accuracy
 reference; it is not intended to provide a speedup over the CUDA solver.
 
+Compare it with zero, training-mean, and interaction-free local-MLP baselines:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\train_baseline.py --model local_mlp --epochs 30 --output-dir results\ml_local_baseline --figure visualization\output\ml_local_baseline_history.png
+.\.venv\Scripts\python.exe .\ml\evaluate_simple_baselines.py --split validation --body-counts 128 --output results\simple_baselines\validation_metrics.csv
+.\.venv\Scripts\python.exe .\ml\compare_baselines.py
+```
+
+The local MLP only sees each body's own position and mass. Its failure relative
+to the pairwise model is the control showing that accurate acceleration requires
+information about other particles rather than only initial-condition bias.
+
 This is intentionally named a **candidate** full dataset. Its labels are FP64
 tiled CUDA results sampled against naïve FP64 CUDA, but the metadata remains
 `pre_serial_validation` and `serial_validated: false`. When the independent CPU

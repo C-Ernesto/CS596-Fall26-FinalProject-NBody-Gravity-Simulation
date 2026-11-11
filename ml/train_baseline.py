@@ -27,7 +27,7 @@ import pandas as pd
 import torch
 from torch import nn
 
-from ml.baseline_model import PairwiseForceBaseline
+from ml.baseline_model import LocalParticleMLP, PairwiseForceBaseline
 from ml.torch_dataset import make_dataloader
 
 
@@ -46,8 +46,9 @@ def parse_body_counts(value: str) -> list[int]:
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train the pairwise force baseline.")
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--figure", type=Path, default=DEFAULT_FIGURE)
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--figure", type=Path)
+    parser.add_argument("--model", choices=["pairwise", "local_mlp"], default="pairwise")
     parser.add_argument("--body-counts", type=parse_body_counts, default=[128])
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--learning-rate", type=float, default=1.0e-3)
@@ -87,6 +88,19 @@ def move_batch(batch: dict, device: torch.device) -> dict:
     }
 
 
+def predict(model: nn.Module, model_name: str, batch: dict) -> torch.Tensor:
+    if model_name == "pairwise":
+        return model(
+            batch["positions"],
+            batch["masses"],
+            batch["epsilon"],
+            batch["ptr"],
+        )
+    if model_name == "local_mlp":
+        return model(batch["node_features"])
+    raise ValueError(f"unknown model: {model_name}")
+
+
 def error_sums(predictions: torch.Tensor, targets: torch.Tensor) -> dict[str, float]:
     difference = predictions - targets
     vector_error = torch.linalg.vector_norm(difference, dim=1)
@@ -119,6 +133,7 @@ def run_epoch(
     loss_function: nn.Module,
     device: torch.device,
     optimizer: torch.optim.Optimizer | None,
+    model_name: str = "pairwise",
 ) -> dict[str, float]:
     training = optimizer is not None
     model.train(training)
@@ -136,12 +151,7 @@ def run_epoch(
         if training:
             optimizer.zero_grad(set_to_none=True)
         with torch.set_grad_enabled(training):
-            predictions = model(
-                batch["positions"],
-                batch["masses"],
-                batch["epsilon"],
-                batch["ptr"],
-            )
+            predictions = predict(model, model_name, batch)
             loss = loss_function(predictions, batch["accelerations"])
             if training:
                 loss.backward()
@@ -189,6 +199,21 @@ def main() -> int:
             raise ValueError("minimum learning rate must be between zero and learning rate")
         set_random_seed(arguments.seed)
         device = choose_device(arguments.device)
+        if arguments.output_dir is None:
+            arguments.output_dir = (
+                DEFAULT_OUTPUT
+                if arguments.model == "pairwise"
+                else PROJECT_ROOT / "results" / "ml_local_baseline"
+            )
+        if arguments.figure is None:
+            arguments.figure = (
+                DEFAULT_FIGURE
+                if arguments.model == "pairwise"
+                else PROJECT_ROOT
+                / "visualization"
+                / "output"
+                / "ml_local_baseline_history.png"
+            )
         output_dir = arguments.output_dir.resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -203,11 +228,17 @@ def main() -> int:
         validation_loader = make_dataloader(
             split="validation", shuffle=False, **loader_arguments
         )
-        model = PairwiseForceBaseline(
-            hidden_dim=arguments.hidden_dim,
-            hidden_layers=arguments.hidden_layers,
-            target_chunk_size=arguments.target_chunk_size,
-        ).to(device)
+        if arguments.model == "pairwise":
+            model = PairwiseForceBaseline(
+                hidden_dim=arguments.hidden_dim,
+                hidden_layers=arguments.hidden_layers,
+                target_chunk_size=arguments.target_chunk_size,
+            ).to(device)
+        else:
+            model = LocalParticleMLP(
+                hidden_dim=arguments.hidden_dim,
+                hidden_layers=arguments.hidden_layers,
+            ).to(device)
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=arguments.learning_rate,
@@ -241,10 +272,10 @@ def main() -> int:
         for epoch in range(1, arguments.epochs + 1):
             train_loader.batch_sampler.set_epoch(epoch)
             train_metrics = run_epoch(
-                model, train_loader, loss_function, device, optimizer
+                model, train_loader, loss_function, device, optimizer, arguments.model
             )
             validation_metrics = run_epoch(
-                model, validation_loader, loss_function, device, None
+                model, validation_loader, loss_function, device, None, arguments.model
             )
             row = {"epoch": epoch}
             row["learning_rate"] = optimizer.param_groups[0]["lr"]

@@ -16,9 +16,15 @@ import pandas as pd
 import torch
 from torch import nn
 
-from ml.baseline_model import PairwiseForceBaseline
+from ml.baseline_model import LocalParticleMLP, PairwiseForceBaseline
 from ml.torch_dataset import make_dataloader
-from ml.train_baseline import choose_device, error_sums, finalize_metrics, parse_body_counts
+from ml.train_baseline import (
+    choose_device,
+    error_sums,
+    finalize_metrics,
+    parse_body_counts,
+    predict,
+)
 
 
 DEFAULT_DATASET = PROJECT_ROOT / "data" / "processed" / "candidate_v1"
@@ -88,11 +94,18 @@ def main() -> int:
             weights_only=False,
         )
         configuration = checkpoint["configuration"]
-        model = PairwiseForceBaseline(
-            hidden_dim=int(configuration["hidden_dim"]),
-            hidden_layers=int(configuration["hidden_layers"]),
-            target_chunk_size=int(configuration["target_chunk_size"]),
-        ).to(device)
+        model_name = configuration.get("model", "pairwise")
+        if model_name == "pairwise":
+            model = PairwiseForceBaseline(
+                hidden_dim=int(configuration["hidden_dim"]),
+                hidden_layers=int(configuration["hidden_layers"]),
+                target_chunk_size=int(configuration["target_chunk_size"]),
+            ).to(device)
+        else:
+            model = LocalParticleMLP(
+                hidden_dim=int(configuration["hidden_dim"]),
+                hidden_layers=int(configuration["hidden_layers"]),
+            ).to(device)
         model.load_state_dict(checkpoint["model_state_dict"])
         model.eval()
         loss_function = nn.SmoothL1Loss(
@@ -117,7 +130,16 @@ def main() -> int:
                 epsilon = batch["epsilon"].to(device, non_blocking=True)
                 ptr = batch["ptr"].to(device, non_blocking=True)
                 targets = batch["accelerations"].to(device, non_blocking=True)
-                predictions = model(positions, masses, epsilon, ptr)
+                model_batch = {
+                    "positions": positions,
+                    "masses": masses,
+                    "epsilon": epsilon,
+                    "ptr": ptr,
+                    "node_features": batch["node_features"].to(
+                        device, non_blocking=True
+                    ),
+                }
+                predictions = predict(model, model_name, model_batch)
                 for system_index, metadata in enumerate(batch["metadata"]):
                     start = int(batch["ptr"][system_index].item())
                     end = int(batch["ptr"][system_index + 1].item())

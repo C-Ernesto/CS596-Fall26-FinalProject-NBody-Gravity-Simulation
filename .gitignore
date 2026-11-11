@@ -39,6 +39,14 @@ CMakeUserPresets.json
 !/results/ml_baseline/*.csv
 !/results/ml_baseline/*.json
 /results/ml_baseline/*.pt
+!/results/ml_local_baseline/
+!/results/ml_local_baseline/*.csv
+!/results/ml_local_baseline/*.json
+/results/ml_local_baseline/*.pt
+!/results/simple_baselines/
+!/results/simple_baselines/*.csv
+!/results/simple_baselines/*.json
+!/results/baseline_comparison.csv
 /data/
 /visualization/output/*
 !/visualization/output/.gitkeep
@@ -49,6 +57,8 @@ CMakeUserPresets.json
 !/visualization/output/dataset_analysis/
 !/visualization/output/dataset_analysis/*.png
 !/visualization/output/ml_baseline_history.png
+!/visualization/output/ml_local_baseline_history.png
+!/visualization/output/baseline_comparison.png
 
 # Scheduler and runtime output
 slurm-*.out

@@ -101,3 +101,30 @@ class PairwiseForceBaseline(nn.Module):
 
             predictions.append(torch.cat(system_predictions, dim=0))
         return torch.cat(predictions, dim=0)
+
+
+class LocalParticleMLP(nn.Module):
+    """Predict acceleration from one body's features without interactions."""
+
+    def __init__(
+        self,
+        input_dim: int = 4,
+        hidden_dim: int = 64,
+        hidden_layers: int = 3,
+    ) -> None:
+        super().__init__()
+        if input_dim <= 0 or hidden_dim <= 0 or hidden_layers <= 0:
+            raise ValueError("input_dim, hidden_dim, and hidden_layers must be positive")
+        layers: list[nn.Module] = []
+        for layer_index in range(hidden_layers):
+            layers.append(
+                nn.Linear(input_dim if layer_index == 0 else hidden_dim, hidden_dim)
+            )
+            layers.append(nn.SiLU())
+        layers.append(nn.Linear(hidden_dim, 3))
+        self.network = nn.Sequential(*layers)
+
+    def forward(self, node_features: torch.Tensor) -> torch.Tensor:
+        if node_features.ndim != 2 or node_features.shape[1] != 4:
+            raise ValueError("node_features must have shape (total_particles, 4)")
+        return self.network(node_features)

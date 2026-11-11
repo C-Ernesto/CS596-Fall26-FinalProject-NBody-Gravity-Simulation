@@ -32,6 +32,7 @@ The ML model must reduce the number of interactions. A neural network applied to
 | Candidate ML dataset generation and loading | Implemented; dataset generated locally |
 | PyTorch tensor, batching, and DataLoader pipeline | Implemented and tested |
 | Small-N fully connected force baseline | Implemented, trained, and evaluated |
+| Zero, mean, and interaction-free MLP baselines | Implemented and evaluated |
 | Serial CPU force calculation | Not implemented yet |
 | OpenMP force calculation | Not implemented yet |
 | CPU/GPU crossover analysis | Waiting for serial/OpenMP implementations |
@@ -550,6 +551,42 @@ Reproduce the evaluations with:
 
 The best checkpoint is saved locally under `results/ml_baseline/best_model.pt` and remains ignored by Git. Configuration, history, summaries, and evaluation tables are retained.
 
+### Simple-baseline comparison
+
+Two deliberately weak alternatives test whether the pairwise model is learning interactions rather than dataset bias:
+
+- `training_mean` predicts the mean acceleration vector from N=128 training rows. Because the systems are centered and conserve internal force, the fitted vector is approximately `(4.9e-11, 1.3e-10, -1.9e-10)` and is effectively identical to zero.
+- `LocalParticleMLP` predicts acceleration from only one body's normalized `(x, y, z, mass)`. It cannot see any other body and therefore cannot calculate interactions.
+
+The local MLP was trained with the same N=128 snapshots, optimizer, Huber loss, validation split, and 30-epoch schedule. The comparison below reports each model's MSE divided by zero-predictor MSE:
+
+| Evaluation | Zero | Training mean | Local particle MLP | Pairwise model |
+|---|---:|---:|---:|---:|
+| Unseen seeds, N=128 | 1.000 | 1.000 | 0.989 | **0.00484** |
+| Unseen count, N=768 | 1.000 | 1.000 | 0.716 | **0.00796** |
+| Held-out disk, N=256 | 1.000 | 1.000 | 0.960 | **0.07499** |
+
+![Force-prediction baseline comparison](visualization/output/baseline_comparison.png)
+
+The local MLP can learn broad distribution-specific tendencies, especially for trained families at N=768, but it cannot recover accurate forces. The pairwise model's much lower error demonstrates that information about other particles is essential. Its remaining weakness on the held-out disk also confirms that interaction modeling alone does not guarantee complete out-of-distribution generalization.
+
+Reproduce these baselines and the comparison:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\train_baseline.py `
+    --model local_mlp --epochs 30 `
+    --output-dir results\ml_local_baseline `
+    --figure visualization\output\ml_local_baseline_history.png
+
+.\.venv\Scripts\python.exe .\ml\evaluate_simple_baselines.py `
+    --split validation --body-counts 128 `
+    --output results\simple_baselines\validation_metrics.csv
+
+.\.venv\Scripts\python.exe .\ml\compare_baselines.py
+```
+
+The corresponding interpolation and held-out-family commands use the same arguments shown for `evaluate_baseline.py` above. Local model checkpoints remain ignored; comparison CSVs, configurations, histories, and plots are retained.
+
 ### Dataset validation status
 
 The current metadata says:
@@ -588,6 +625,8 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 │   ├── baseline_model.py       O(N²) equivariant accuracy baseline
 │   ├── train_baseline.py       training and checkpoint selection
 │   ├── evaluate_baseline.py    per-family/count evaluation
+│   ├── evaluate_simple_baselines.py
+│   ├── compare_baselines.py    combined baseline table and plot
 │   ├── prepare_dataset.py      earlier small-pilot splitter
 │   └── dataset.py              Parquet snapshot loader
 ├── results/                    selected versioned results; other output ignored
