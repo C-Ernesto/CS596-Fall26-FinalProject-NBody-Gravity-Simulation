@@ -1,0 +1,13 @@
+{
+  "predictor": "exact",
+  "checkpoint": null,
+  "checkpoint_epoch": null,
+  "split": "validation",
+  "evaluation_group": null,
+  "body_counts": [
+    128
+  ],
+  "trajectories": 6,
+  "device": "cuda",
+  "dtype": "torch.float64"
+}

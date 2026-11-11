@@ -76,11 +76,14 @@ class SnapshotDataset:
             accelerations /= total_mass / radius**2
             epsilon /= radius
 
+        metadata_values = metadata.to_dict()
+        metadata_values["dt"] = float(frame["dt"].iloc[0])
+
         return {
             "positions": positions,
             "velocities": velocities,
             "masses": masses,
             "accelerations": accelerations,
             "epsilon": epsilon,
-            "metadata": metadata.to_dict(),
+            "metadata": metadata_values,
         }

@@ -587,6 +587,55 @@ Reproduce these baselines and the comparison:
 
 The corresponding interpolation and held-out-family commands use the same arguments shown for `evaluate_baseline.py` above. Local model checkpoints remain ignored; comparison CSVs, configurations, histories, and plots are retained.
 
+### Autoregressive rollout evaluation
+
+One-step force accuracy does not guarantee a stable simulation because every predicted acceleration changes the state used for the next prediction. `rollout_baseline.py` inserts either exact direct forces or the learned pairwise model into velocity-Verlet and compares against the eight saved CUDA checkpoints from steps 0 through 175.
+
+The prepared dataset uses normalized position, velocity, mass, acceleration, and softening. The rollout therefore converts the stored physical time step using `dt_normalized = dt * sqrt(M / R^3)` before integration.
+
+First validate the Python rollout with FP64 direct forces:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\rollout_baseline.py `
+    --predictor exact --split validation --body-counts 128
+```
+
+Across all six N=128 validation trajectories, the exact Python rollout reproduced the CUDA final positions with overall RMSE `2.72e-16` after 175 steps. This verifies the unit conversion, force expression, snapshot alignment, and velocity-Verlet implementation independently of the learned model.
+
+Run the learned-force rollout:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\rollout_baseline.py `
+    --predictor learned --split validation --body-counts 128
+```
+
+Mean errors at the final saved checkpoint are:
+
+| Family | Position RMSE | Velocity RMSE | Force RMSE on exact state | Relative energy drift |
+|---|---:|---:|---:|---:|
+| Plummer sphere | 7.94e-4 | 9.95e-3 | 6.73e-2 | 1.11e-3 |
+| Two-cluster collision | 6.68e-5 | 8.82e-3 | 4.44e-1 | 1.51e-3 |
+| Uniform cube | 4.82e-4 | 2.45e-2 | 5.64e-1 | 2.24e-3 |
+| Overall | **4.47e-4** | **1.44e-2** | **3.58e-1** | **1.62e-3** |
+
+Overall learned-rollout momentum drift was `8.54e-9`. The exact-force rollout's mean relative energy drift was `8.21e-6`, representing normal finite-step velocity-Verlet error, while the learned rollout's larger drift includes force-approximation error.
+
+The held-out rotating disk at N=256 is substantially harder. Across its four trajectories, final mean position RMSE was `5.67e-3`, velocity RMSE was `1.03e-1`, force RMSE was `1.19`, and relative energy drift was `2.51e-2`. This approximately tenfold increase in position error and order-of-magnitude increase in energy drift show that the one-step held-out-family accuracy gap compounds during integration.
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\rollout_baseline.py `
+    --predictor learned --split test `
+    --evaluation-group held_out_family --body-counts 256 `
+    --output-dir results\rollout_learned_disk `
+    --figure-dir visualization\output\rollout_learned_disk
+```
+
+![Learned autoregressive rollout errors](visualization/output/rollout_learned/rollout_errors.png)
+
+![Final exact and learned positions](visualization/output/rollout_learned/rollout_final_positions.png)
+
+The rollout remains close over this short horizon, but velocity and energy errors accumulate. Longer horizons and the held-out disk should be tested before claiming long-term stability. Per-trajectory results are stored under `results/rollout_exact/` and `results/rollout_learned/`.
+
 ### Dataset validation status
 
 The current metadata says:
@@ -627,6 +676,8 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 │   ├── evaluate_baseline.py    per-family/count evaluation
 │   ├── evaluate_simple_baselines.py
 │   ├── compare_baselines.py    combined baseline table and plot
+│   ├── rollout.py              integration and physical diagnostics
+│   ├── rollout_baseline.py     exact/learned trajectory evaluation
 │   ├── prepare_dataset.py      earlier small-pilot splitter
 │   └── dataset.py              Parquet snapshot loader
 ├── results/                    selected versioned results; other output ignored

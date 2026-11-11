@@ -1,0 +1,13 @@
+{
+  "predictor": "learned",
+  "checkpoint": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_baseline\\best_model.pt",
+  "checkpoint_epoch": 30,
+  "split": "test",
+  "evaluation_group": "held_out_family",
+  "body_counts": [
+    256
+  ],
+  "trajectories": 4,
+  "device": "cuda",
+  "dtype": "torch.float32"
+}

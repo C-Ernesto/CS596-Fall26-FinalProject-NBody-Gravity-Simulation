@@ -111,6 +111,18 @@ The local MLP only sees each body's own position and mass. Its failure relative
 to the pairwise model is the control showing that accurate acceleration requires
 information about other particles rather than only initial-condition bias.
 
+Validate the normalized velocity-Verlet rollout and then run it with learned
+forces:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\rollout_baseline.py --predictor exact --split validation --body-counts 128
+.\.venv\Scripts\python.exe .\ml\rollout_baseline.py --predictor learned --split validation --body-counts 128
+```
+
+The exact predictor checks the Python integrator against saved FP64 CUDA states.
+The learned predictor measures autoregressive position, velocity, force, energy,
+and momentum errors at each saved checkpoint.
+
 This is intentionally named a **candidate** full dataset. Its labels are FP64
 tiled CUDA results sampled against naïve FP64 CUDA, but the metadata remains
 `pre_serial_validation` and `serial_validated: false`. When the independent CPU

@@ -47,6 +47,15 @@ CMakeUserPresets.json
 !/results/simple_baselines/*.csv
 !/results/simple_baselines/*.json
 !/results/baseline_comparison.csv
+!/results/rollout_exact/
+!/results/rollout_exact/*.csv
+!/results/rollout_exact/*.json
+!/results/rollout_learned/
+!/results/rollout_learned/*.csv
+!/results/rollout_learned/*.json
+!/results/rollout_learned_disk/
+!/results/rollout_learned_disk/*.csv
+!/results/rollout_learned_disk/*.json
 /data/
 /visualization/output/*
 !/visualization/output/.gitkeep
@@ -59,6 +68,12 @@ CMakeUserPresets.json
 !/visualization/output/ml_baseline_history.png
 !/visualization/output/ml_local_baseline_history.png
 !/visualization/output/baseline_comparison.png
+!/visualization/output/rollout_exact/
+!/visualization/output/rollout_exact/*.png
+!/visualization/output/rollout_learned/
+!/visualization/output/rollout_learned/*.png
+!/visualization/output/rollout_learned_disk/
+!/visualization/output/rollout_learned_disk/*.png
 
 # Scheduler and runtime output
 slurm-*.out
