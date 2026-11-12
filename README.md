@@ -1,8 +1,8 @@
 # CUDA N-Body Simulation and Machine-Learned Force Approximation
 
-This project studies the performance of gravitational N-body simulation on CPUs and GPUs and asks whether a machine-learning surrogate can eventually approximate the expensive all-pairs force calculation. The exact direct method requires every body to interact with every other body, so one force evaluation is O(N²). The project currently has working naïve and shared-memory-tiled CUDA implementations, a velocity-Verlet integrator, performance analysis tools, four initial-condition families, and a complete candidate ML dataset pipeline.
+This project studies the performance of gravitational N-body simulation on CPUs and GPUs and asks whether a machine-learning surrogate can approximate the expensive all-pairs force calculation. The exact direct method requires every body to interact with every other body, so one force evaluation is O(N²). The project currently has working naïve and shared-memory-tiled CUDA implementations, a velocity-Verlet integrator, performance analysis tools, four initial-condition families, a complete candidate ML dataset pipeline, and an initial Barnes–Hut-style exact-near/learned-far force prototype.
 
-The serial CPU, OpenMP CPU, and learned-force model are the main remaining components. Until an independent serial FP64 implementation validates a representative sample of the generated labels, the dataset is deliberately described as a **candidate dataset**, not a frozen final dataset.
+The serial CPU and OpenMP CPU implementations remain to be added. The hierarchical ML prototype also needs optimization, training specifically on aggregate cells, and rollout evaluation. Until an independent serial FP64 implementation validates a representative sample of the generated labels, the dataset is deliberately described as a **candidate dataset**, not a frozen final dataset.
 
 ## Research questions
 
@@ -36,7 +36,7 @@ The ML model must reduce the number of interactions. A neural network applied to
 | Serial CPU force calculation | Not implemented yet |
 | OpenMP force calculation | Not implemented yet |
 | CPU/GPU crossover analysis | Waiting for serial/OpenMP implementations |
-| Hierarchical learned-force model | Planned, not implemented |
+| Hierarchical exact-near/learned-far model | Initial prototype implemented and evaluated |
 | CUDA labels validated against independent CPU FP64 | Waiting for serial implementation |
 
 ## Physical and numerical model
@@ -636,6 +636,41 @@ The held-out rotating disk at N=256 is substantially harder. Across its four tra
 
 The rollout remains close over this short horizon, but velocity and energy errors accumulate. Longer horizons and the held-out disk should be tested before claiming long-term stability. Per-trajectory results are stored under `results/rollout_exact/` and `results/rollout_learned/`.
 
+### Hierarchical exact-near/learned-far prototype
+
+`HierarchicalForceModel` builds an octree for each snapshot. Leaf particles and nearby cells are evaluated with the exact softened-gravity expression, while sufficiently distant cells are replaced by one center-of-mass interaction. The far-field interaction uses the radial network copied from the trained pairwise baseline. The Barnes–Hut opening angle `theta` controls the tradeoff: `theta=0` opens every cell and reproduces direct all-pairs forces, while larger values accept more aggregate cells and evaluate fewer interactions.
+
+The zero-angle unit test reproduces direct force to tight floating-point tolerance and checks that exactly `N(N-1)` directed body interactions are evaluated. The first sweep used two snapshots per validation family at N=128. A second sweep tested one unseen-count N=768 snapshot per family:
+
+| N | θ | Interaction ratio range | Relative L2 force-error range |
+|---:|---:|---:|---:|
+| 128 | 0.0 | 100% | approximately 2e-7 to 2e-6 |
+| 128 | 0.7 | 77.6%–91.2% | 0.089%–1.36% |
+| 128 | 1.2 | 55.2%–67.8% | 1.40%–4.80% |
+| 768 | 0.7 | 51.7%–67.9% | 1.20%–2.37% |
+| 768 | 1.2 | 19.1%–41.9% | 4.20%–7.88% |
+
+These results demonstrate the intended accuracy-versus-work tradeoff and show that the interaction reduction improves as N grows. They do **not** yet establish a speedup over tiled CUDA. The current octree and traversal are built in Python on the CPU, and tree construction dominates the reported end-to-end time. A production comparison requires a parallel tree builder, optimized traversal, transfer accounting, and the same hardware/timing protocol as the exact solvers.
+
+Run both sweeps with:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\evaluate_hierarchical.py `
+    --theta 0,0.3,0.5,0.7,1.0,1.2 `
+    --snapshots-per-case 2 --body-counts 128 --device cuda
+
+.\.venv\Scripts\python.exe .\ml\evaluate_hierarchical.py `
+    --split test --evaluation-group interpolation_counts `
+    --theta 0,0.5,0.7,1.0,1.2 `
+    --snapshots-per-case 1 --body-counts 768 --device cuda `
+    --output-dir results\hierarchical_sweep_768 `
+    --figure visualization\output\hierarchical_tradeoff_768.png
+```
+
+![N=128 hierarchical accuracy-work tradeoff](visualization/output/hierarchical_tradeoff.png)
+
+![N=768 hierarchical accuracy-work tradeoff](visualization/output/hierarchical_tradeoff_768.png)
+
 ### Dataset validation status
 
 The current metadata says:
@@ -678,6 +713,8 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 │   ├── compare_baselines.py    combined baseline table and plot
 │   ├── rollout.py              integration and physical diagnostics
 │   ├── rollout_baseline.py     exact/learned trajectory evaluation
+│   ├── hierarchical_model.py   octree exact-near/learned-far prototype
+│   ├── evaluate_hierarchical.py accuracy-versus-work sweep
 │   ├── prepare_dataset.py      earlier small-pilot splitter
 │   └── dataset.py              Parquet snapshot loader
 ├── results/                    selected versioned results; other output ignored
@@ -691,8 +728,9 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 2. Implement OpenMP and measure scaling across thread counts.
 3. Compare serial, OpenMP, naïve CUDA, and tiled CUDA to find the CPU/GPU crossover point.
 4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
-5. Build a small learned-force baseline using the completed PyTorch input pipeline, followed by a sparse hierarchical or hybrid exact-near/learned-far model.
-6. Evaluate one-step acceleration error, unseen-N and held-out-family generalization, rollout stability, energy drift, momentum drift, and end-to-end inference time.
-7. If time permits, compare against Barnes-Hut so the learned approximation is evaluated against a strong classical O(N log N) method, not only direct summation.
+5. Fine-tune the hierarchical model on aggregate-cell examples instead of only reusing pairwise radial weights.
+6. Move octree construction and traversal out of Python, then measure complete end-to-end time against exact CPU and CUDA solvers.
+7. Run hierarchical rollouts and evaluate unseen-N and held-out-family generalization, energy drift, and momentum drift.
+8. Compare the learned far-field rule with a classical analytical Barnes–Hut rule at identical opening angles and tree construction cost.
 
 Any ML speedup claim must include graph construction, preprocessing, transfers, and inference. Kernel-only ML timing must not be compared with end-to-end exact-solver timing.

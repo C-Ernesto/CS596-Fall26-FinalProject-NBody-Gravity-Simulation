@@ -56,6 +56,12 @@ CMakeUserPresets.json
 !/results/rollout_learned_disk/
 !/results/rollout_learned_disk/*.csv
 !/results/rollout_learned_disk/*.json
+!/results/hierarchical_sweep/
+!/results/hierarchical_sweep/*.csv
+!/results/hierarchical_sweep/*.json
+!/results/hierarchical_sweep_768/
+!/results/hierarchical_sweep_768/*.csv
+!/results/hierarchical_sweep_768/*.json
 /data/
 /visualization/output/*
 !/visualization/output/.gitkeep
@@ -74,6 +80,8 @@ CMakeUserPresets.json
 !/visualization/output/rollout_learned/*.png
 !/visualization/output/rollout_learned_disk/
 !/visualization/output/rollout_learned_disk/*.png
+!/visualization/output/hierarchical_tradeoff.png
+!/visualization/output/hierarchical_tradeoff_768.png
 
 # Scheduler and runtime output
 slurm-*.out

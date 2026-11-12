@@ -123,6 +123,21 @@ The exact predictor checks the Python integrator against saved FP64 CUDA states.
 The learned predictor measures autoregressive position, velocity, force, energy,
 and momentum errors at each saved checkpoint.
 
+Evaluate the first scalable-force prototype:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\evaluate_hierarchical.py --theta 0,0.3,0.5,0.7,1.0,1.2 --snapshots-per-case 2 --body-counts 128 --device cuda
+.\.venv\Scripts\python.exe .\ml\evaluate_hierarchical.py --split test --evaluation-group interpolation_counts --theta 0,0.5,0.7,1.0,1.2 --snapshots-per-case 1 --body-counts 768 --device cuda --output-dir results\hierarchical_sweep_768 --figure visualization\output\hierarchical_tradeoff_768.png
+```
+
+`HierarchicalForceModel` uses exact interactions for nearby leaf particles and
+the pairwise baseline's learned radial function for accepted far-field
+center-of-mass cells. Setting `theta=0` is the correctness control: it opens
+every cell and matches direct force. Increasing `theta` reduces evaluated
+interactions at the cost of force error. The current CPU/Python tree builder is
+a research prototype and dominates runtime, so these sweeps establish an
+accuracy-versus-work tradeoff rather than a CUDA speedup.
+
 This is intentionally named a **candidate** full dataset. Its labels are FP64
 tiled CUDA results sampled against naïve FP64 CUDA, but the metadata remains
 `pre_serial_validation` and `serial_validated: false`. When the independent CPU
