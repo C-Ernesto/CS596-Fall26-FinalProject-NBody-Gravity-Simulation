@@ -99,12 +99,18 @@ def build_hierarchical_interactions(
     theta: float,
     leaf_capacity: int,
     maximum_depth: int,
-) -> dict[str, torch.Tensor | int]:
+) -> dict[str, torch.Tensor | int | float]:
     """Build target/source interactions with exact leaf particles and aggregate cells."""
     if theta < 0.0:
         raise ValueError("theta cannot be negative")
+    if positions.is_cuda:
+        torch.cuda.synchronize(positions.device)
+    host_copy_started = time.perf_counter()
     positions_cpu = positions.detach().cpu().numpy().astype(np.float64, copy=False)
     masses_cpu = masses.detach().cpu().numpy().reshape(-1).astype(np.float64, copy=False)
+    host_copy_seconds = time.perf_counter() - host_copy_started
+
+    tree_started = time.perf_counter()
     root = build_octree(positions_cpu, masses_cpu, leaf_capacity, maximum_depth)
 
     target_indices: list[int] = []
@@ -152,6 +158,8 @@ def build_hierarchical_interactions(
             for octant, child in node.children.items():
                 stack.append((child, contains_target and octant == target_octant))
 
+    tree_seconds = time.perf_counter() - tree_started
+
     device = positions.device
     dtype = positions.dtype
     source_array = (
@@ -159,7 +167,8 @@ def build_hierarchical_interactions(
         if source_positions
         else np.empty((0, 3), dtype=np.float64)
     )
-    return {
+    interaction_transfer_started = time.perf_counter()
+    result = {
         "target_indices": torch.tensor(target_indices, dtype=torch.long, device=device),
         "source_positions": torch.as_tensor(
             source_array, dtype=dtype, device=device
@@ -176,6 +185,18 @@ def build_hierarchical_interactions(
         "body_interactions": aggregate_flags.count(False),
         "aggregate_interactions": aggregate_flags.count(True),
     }
+    if positions.is_cuda:
+        torch.cuda.synchronize(positions.device)
+    result.update(
+        {
+            "host_copy_seconds": host_copy_seconds,
+            "tree_seconds": tree_seconds,
+            "interaction_transfer_seconds": (
+                time.perf_counter() - interaction_transfer_started
+            ),
+        }
+    )
+    return result
 
 
 class HierarchicalForceModel(nn.Module):
@@ -221,7 +242,11 @@ class HierarchicalForceModel(nn.Module):
         total_body = 0
         total_aggregate = 0
         build_seconds = 0.0
+        host_copy_seconds = 0.0
+        tree_seconds = 0.0
+        interaction_transfer_seconds = 0.0
         interaction_seconds = 0.0
+        momentum_projection_seconds = 0.0
 
         for system_index in range(len(epsilon)):
             start = int(ptr[system_index].item())
@@ -237,6 +262,11 @@ class HierarchicalForceModel(nn.Module):
                 self.maximum_depth,
             )
             build_seconds += time.perf_counter() - build_started
+            host_copy_seconds += float(interactions["host_copy_seconds"])
+            tree_seconds += float(interactions["tree_seconds"])
+            interaction_transfer_seconds += float(
+                interactions["interaction_transfer_seconds"]
+            )
             total_body += int(interactions["body_interactions"])
             total_aggregate += int(interactions["aggregate_interactions"])
 
@@ -306,19 +336,27 @@ class HierarchicalForceModel(nn.Module):
             if positions.is_cuda:
                 torch.cuda.synchronize(positions.device)
             interaction_seconds += time.perf_counter() - interaction_started
+            projection_started = time.perf_counter()
             total_mass = system_masses.sum().clamp_min(1.0e-12)
             center_of_mass_acceleration = (
                 system_masses * system_output
             ).sum(dim=0) / total_mass
             system_output = system_output - center_of_mass_acceleration
             output[start:end] = system_output
+            if positions.is_cuda:
+                torch.cuda.synchronize(positions.device)
+            momentum_projection_seconds += time.perf_counter() - projection_started
 
         self.last_interaction_stats = {
             "body_interactions": total_body,
             "aggregate_interactions": total_aggregate,
             "total_interactions": total_body + total_aggregate,
             "build_seconds": build_seconds,
+            "host_copy_seconds": host_copy_seconds,
+            "tree_seconds": tree_seconds,
+            "interaction_transfer_seconds": interaction_transfer_seconds,
             "interaction_seconds": interaction_seconds,
+            "momentum_projection_seconds": momentum_projection_seconds,
         }
         return output
 

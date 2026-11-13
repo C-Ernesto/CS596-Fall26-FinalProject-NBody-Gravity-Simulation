@@ -1,0 +1,27 @@
+{
+  "dataset": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\data\\processed\\candidate_v1",
+  "checkpoint": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_hierarchical_geometry\\best_model.pt",
+  "checkpoint_epoch": 10,
+  "cuda_results": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\cuda_optimized_scaling.csv",
+  "body_counts": [
+    128,
+    256,
+    512,
+    768,
+    1024,
+    1536,
+    2048,
+    3072
+  ],
+  "theta": 0.7,
+  "leaf_capacity": 16,
+  "warmups": 1,
+  "repetitions": 5,
+  "device_requested": "cuda",
+  "device_used": "cuda",
+  "torch_version": "2.11.0+cu128",
+  "cuda_runtime": "12.8",
+  "gpu": "NVIDIA GeForce RTX 3060 Laptop GPU",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "comparison_note": "CUDA rows are existing 10-step runtimes divided by step count and are not paired to the selected ML snapshots."
+}

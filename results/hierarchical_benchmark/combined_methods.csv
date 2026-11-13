@@ -1,0 +1,16 @@
+particle_count,median_ms,method,measurement_scope
+128,25.04270000008546,Sparse learned force (end-to-end),current run; one force evaluation
+256,73.41699999960838,Sparse learned force (end-to-end),current run; one force evaluation
+512,263.89309999967736,Sparse learned force (end-to-end),current run; one force evaluation
+768,450.3812999996626,Sparse learned force (end-to-end),current run; one force evaluation
+1024,581.0061000001951,Sparse learned force (end-to-end),current run; one force evaluation
+1536,720.3803999996126,Sparse learned force (end-to-end),current run; one force evaluation
+2048,1056.431800000155,Sparse learned force (end-to-end),current run; one force evaluation
+3072,1942.6516000003176,Sparse learned force (end-to-end),current run; one force evaluation
+256,0.23268,Tiled CUDA (amortized per step),existing independent 10-step benchmark
+512,0.42872000000000005,Tiled CUDA (amortized per step),existing independent 10-step benchmark
+1024,0.78118,Tiled CUDA (amortized per step),existing independent 10-step benchmark
+2048,2.14115,Tiled CUDA (amortized per step),existing independent 10-step benchmark
+4096,6.21907,Tiled CUDA (amortized per step),existing independent 10-step benchmark
+8192,20.48176,Tiled CUDA (amortized per step),existing independent 10-step benchmark
+16384,74.46724,Tiled CUDA (amortized per step),existing independent 10-step benchmark

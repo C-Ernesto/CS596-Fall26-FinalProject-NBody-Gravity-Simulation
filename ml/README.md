@@ -87,6 +87,23 @@ interactions at the cost of force error. The current CPU/Python tree builder is
 a research prototype and dominates runtime, so these sweeps establish an
 accuracy-versus-work tradeoff rather than a CUDA speedup.
 
+Benchmark the complete sparse pipeline, including hierarchy construction,
+transfers, neural evaluation, and momentum projection:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\benchmark_hierarchical.py --device cuda
+```
+
+This runs one warm-up and five measured repetitions for N=128 through N=3072,
+writes detailed and median CSV files under `results/hierarchical_benchmark/`,
+and produces `visualization/output/hierarchical_benchmark.png`. The included
+run retained 13.8% of all-pairs interactions at N=3072 with 1.38% relative L2
+force error, but took 1943 ms end to end. The existing tiled-CUDA result at the
+nearest shared scale, N=2048, amortizes to 2.14 ms per simulation step versus
+1056 ms for one sparse Python force prediction. This confirms that
+tree/traversal and interaction packing must be
+optimized before reduced interaction count can become a speedup.
+
 Fine-tune the aggregate-cell radial network while leaving exact-near forces
 fixed:
 

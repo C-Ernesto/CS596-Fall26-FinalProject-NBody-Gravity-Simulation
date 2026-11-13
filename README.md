@@ -660,6 +660,44 @@ Evaluate unseen N=768 with:
 
 ![N=768 hierarchical accuracy-work tradeoff](visualization/output/hierarchical_geometry_768.png)
 
+### End-to-end sparse-force benchmark
+
+The reproducible benchmark includes input transfer, CPU tree input copying,
+octree construction and traversal, interaction-list transfer, exact/learned
+force evaluation, and the momentum-conservation projection. It performs one
+warm-up followed by five measured repetitions and reports medians:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\benchmark_hierarchical.py --device cuda
+```
+
+The default sweep uses one deterministic uniform-cube snapshot at each
+available size from N=128 through N=3072. Detailed repetitions are written to
+`results/hierarchical_benchmark/per_run.csv`, medians to `summary.csv`, and a
+long-form comparison with the existing tiled-CUDA measurements to
+`combined_methods.csv`. `config.json` records the device, software versions,
+checkpoint, and benchmark settings.
+
+On the RTX 3060 Laptop GPU used for the included run, the sparse method retained
+78.2% of direct interactions at N=128 and 13.8% at N=3072. Relative L2 force
+error was 0.37% and 1.38%, respectively. However, end-to-end time was 25.0 ms at
+N=128 and 1943 ms at N=3072. At the directly overlapping N=2048 point, the
+sparse prototype took 1056 ms for one force prediction while the existing
+tiled-CUDA 10-step benchmark amortizes to 2.14 ms per simulation step. The
+current model therefore demonstrates reduced work with modest
+force error, **not a runtime speedup**. CPU/Python tree construction and
+interaction-list creation/transfer dominate; neural force evaluation itself
+took only 2.2–58.6 ms across the sweep.
+
+The CUDA line divides each existing 10-step runtime by ten to report an
+amortized per-step value. It is an independent benchmark rather than a paired
+run on the exact same snapshots, and an integration step is not identical to a
+standalone force prediction. It is suitable for identifying the large current
+performance gap but not for a final speedup claim. A final comparison must run
+both methods under one timing protocol on the same machine and inputs.
+
+![Sparse learned-force benchmark](visualization/output/hierarchical_benchmark.png)
+
 ### Hierarchical rollout evaluation
 
 The geometry-aware model was inserted into velocity-Verlet at `theta=0.7` and run for 175 steps. The N=128 validation result averages all six trajectories:
@@ -734,6 +772,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 │   ├── hierarchical_model.py   octree exact-near/learned-far prototype
 │   ├── train_hierarchical.py   aggregate-cell far-field fine-tuning
 │   ├── evaluate_hierarchical.py accuracy-versus-work sweep
+│   ├── benchmark_hierarchical.py end-to-end sparse-force timing
 │   └── dataset.py              Parquet snapshot loader
 ├── results/                    selected versioned results; other output ignored
 ├── visualization/output/       selected versioned plots; other output ignored
@@ -746,7 +785,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 2. Implement OpenMP and measure scaling across thread counts.
 3. Compare serial, OpenMP, naïve CUDA, and tiled CUDA to find the CPU/GPU crossover point.
 4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
-5. Optimize or replace the Python octree construction so reduced interaction counts can be tested as an actual end-to-end runtime improvement.
+5. Move octree construction, traversal, and interaction packing out of Python and onto an optimized parallel path; the stage benchmark shows these dominate current runtime.
 6. Evaluate the sparse ML model over larger particle counts and longer rollouts while tracking force, trajectory, energy, and momentum error.
 7. Investigate richer cell features only if the current accuracy is insufficient for the target speedup.
 
