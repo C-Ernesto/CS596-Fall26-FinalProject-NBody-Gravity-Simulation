@@ -18,6 +18,7 @@ CMakeUserPresets.json
 *.lib
 *.so
 *.dll
+*.pyd
 *.dylib
 *.exe
 *.exp
@@ -64,6 +65,9 @@ CMakeUserPresets.json
 !/results/hierarchical_benchmark/
 !/results/hierarchical_benchmark/*.csv
 !/results/hierarchical_benchmark/*.json
+!/results/hierarchical_benchmark_cpp/
+!/results/hierarchical_benchmark_cpp/*.csv
+!/results/hierarchical_benchmark_cpp/*.json
 !/results/rollout_hierarchical/
 !/results/rollout_hierarchical/*.csv
 !/results/rollout_hierarchical/*.json
@@ -91,6 +95,7 @@ CMakeUserPresets.json
 !/visualization/output/hierarchical_geometry_768.png
 !/visualization/output/hierarchical_geometry_disk.png
 !/visualization/output/hierarchical_benchmark.png
+!/visualization/output/hierarchical_benchmark_cpp.png
 !/visualization/output/rollout_hierarchical/
 !/visualization/output/rollout_hierarchical/*.png
 !/visualization/output/rollout_hierarchical_disk/

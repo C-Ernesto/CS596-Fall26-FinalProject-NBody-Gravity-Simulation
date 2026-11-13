@@ -1,0 +1,16 @@
+particle_count,median_ms,method,measurement_scope
+128,4.311300000154006,Sparse learned force (cpp builder),current run; one force evaluation
+256,5.018200000449724,Sparse learned force (cpp builder),current run; one force evaluation
+512,13.445700000374927,Sparse learned force (cpp builder),current run; one force evaluation
+768,24.527100000341306,Sparse learned force (cpp builder),current run; one force evaluation
+1024,37.159800000154064,Sparse learned force (cpp builder),current run; one force evaluation
+1536,36.9581000004473,Sparse learned force (cpp builder),current run; one force evaluation
+2048,55.50760000005539,Sparse learned force (cpp builder),current run; one force evaluation
+3072,127.12120000014693,Sparse learned force (cpp builder),current run; one force evaluation
+256,0.23268,Tiled CUDA (amortized per step),existing independent 10-step benchmark
+512,0.42872000000000005,Tiled CUDA (amortized per step),existing independent 10-step benchmark
+1024,0.78118,Tiled CUDA (amortized per step),existing independent 10-step benchmark
+2048,2.14115,Tiled CUDA (amortized per step),existing independent 10-step benchmark
+4096,6.21907,Tiled CUDA (amortized per step),existing independent 10-step benchmark
+8192,20.48176,Tiled CUDA (amortized per step),existing independent 10-step benchmark
+16384,74.46724,Tiled CUDA (amortized per step),existing independent 10-step benchmark

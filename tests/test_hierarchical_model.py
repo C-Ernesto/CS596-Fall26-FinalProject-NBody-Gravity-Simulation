@@ -10,6 +10,40 @@ from ml.rollout import exact_acceleration
 
 
 class HierarchicalForceModelTests(unittest.TestCase):
+    def test_cpp_backend_matches_python_backend(self) -> None:
+        try:
+            from ml import _hierarchical_cpp  # noqa: F401
+        except ImportError:
+            self.skipTest("optional compiled hierarchy backend is not built")
+        torch.manual_seed(3)
+        positions = torch.rand(128, 3)
+        masses = torch.rand(128, 1)
+        masses /= masses.sum()
+        epsilon = torch.tensor([0.01])
+        ptr = torch.tensor([0, 128])
+        python_model = HierarchicalForceModel(
+            hidden_dim=8,
+            hidden_layers=1,
+            theta=0.7,
+            leaf_capacity=16,
+            interaction_backend="python",
+        )
+        cpp_model = HierarchicalForceModel(
+            hidden_dim=8,
+            hidden_layers=1,
+            theta=0.7,
+            leaf_capacity=16,
+            interaction_backend="cpp",
+        )
+        cpp_model.load_state_dict(python_model.state_dict())
+        python_result = python_model(positions, masses, epsilon, ptr)
+        cpp_result = cpp_model(positions, masses, epsilon, ptr)
+        self.assertEqual(
+            python_model.last_interaction_stats["total_interactions"],
+            cpp_model.last_interaction_stats["total_interactions"],
+        )
+        torch.testing.assert_close(cpp_result, python_result, rtol=2.0e-5, atol=3.0e-6)
+
     def test_zero_theta_matches_direct_force(self) -> None:
         torch.manual_seed(4)
         positions = torch.randn(17, 3, dtype=torch.float64)

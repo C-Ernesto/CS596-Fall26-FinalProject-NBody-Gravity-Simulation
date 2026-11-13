@@ -46,6 +46,15 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--body-counts", type=parse_body_counts, default=DEFAULT_COUNTS)
     parser.add_argument("--theta", type=float, default=0.7)
     parser.add_argument("--leaf-capacity", type=int, default=16)
+    parser.add_argument(
+        "--backend", choices=["python", "cpp", "auto"], default="auto"
+    )
+    parser.add_argument(
+        "--builder-threads",
+        type=int,
+        default=0,
+        help="OpenMP threads for the compiled builder; 0 uses its runtime default.",
+    )
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
@@ -57,7 +66,13 @@ def synchronize(device: torch.device) -> None:
         torch.cuda.synchronize(device)
 
 
-def load_model(path: Path, device: torch.device, theta: float, leaf_capacity: int):
+def load_model(
+    path: Path,
+    device: torch.device,
+    theta: float,
+    leaf_capacity: int,
+    backend: str,
+):
     checkpoint = torch.load(path, map_location=device, weights_only=False)
     configuration = checkpoint["configuration"]
     model = HierarchicalForceModel(
@@ -65,6 +80,7 @@ def load_model(path: Path, device: torch.device, theta: float, leaf_capacity: in
         hidden_layers=int(configuration["hidden_layers"]),
         theta=theta,
         leaf_capacity=leaf_capacity,
+        interaction_backend=backend,
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
@@ -165,11 +181,15 @@ def median_summary(rows: pd.DataFrame) -> pd.DataFrame:
     return summary.merge(runs, on="particle_count")
 
 
-def combine_cuda(summary: pd.DataFrame, cuda_path: Path) -> pd.DataFrame:
+def combine_cuda(
+    summary: pd.DataFrame, cuda_path: Path, interaction_backend: str
+) -> pd.DataFrame:
     ml_rows = summary[["particle_count", "end_to_end_ms"]].rename(
         columns={"end_to_end_ms": "median_ms"}
     )
-    ml_rows["method"] = "Sparse learned force (end-to-end)"
+    ml_rows["method"] = (
+        f"Sparse learned force ({interaction_backend} builder)"
+    )
     ml_rows["measurement_scope"] = "current run; one force evaluation"
     if not cuda_path.exists():
         return ml_rows
@@ -262,16 +282,38 @@ def main() -> int:
             raise ValueError("theta and leaf-capacity must be positive")
         if arguments.warmups < 0 or arguments.repetitions <= 0:
             raise ValueError("warmups must be nonnegative and repetitions must be positive")
+        if arguments.builder_threads < 0:
+            raise ValueError("builder-threads cannot be negative")
+        builder_threads = None
+        if arguments.backend in {"cpp", "auto"}:
+            try:
+                from ml import _hierarchical_cpp
+            except ImportError:
+                if arguments.backend == "cpp":
+                    raise RuntimeError(
+                        "compiled interaction backend is unavailable; build it first"
+                    ) from None
+            else:
+                if arguments.builder_threads > 0:
+                    _hierarchical_cpp.set_num_threads(arguments.builder_threads)
+                builder_threads = int(_hierarchical_cpp.max_threads())
         device = choose_device(arguments.device)
         model, checkpoint = load_model(
-            arguments.checkpoint, device, arguments.theta, arguments.leaf_capacity
+            arguments.checkpoint,
+            device,
+            arguments.theta,
+            arguments.leaf_capacity,
+            arguments.backend,
         )
         dataset = NBodyTorchDataset(
             root=arguments.dataset, particle_counts=arguments.body_counts
         )
         samples = select_samples(dataset, arguments.body_counts)
         records: list[dict[str, float | int | str]] = []
-        print(f"Benchmarking on {device} with theta={arguments.theta}")
+        print(
+            f"Benchmarking on {device} with theta={arguments.theta}, "
+            f"backend={arguments.backend}, builder_threads={builder_threads}"
+        )
         with torch.inference_mode():
             for sample in samples:
                 for _ in range(arguments.warmups):
@@ -302,7 +344,8 @@ def main() -> int:
 
         rows = pd.DataFrame(records)
         summary = median_summary(rows)
-        combined = combine_cuda(summary, arguments.cuda_results)
+        resolved_backend = str(model.last_interaction_stats["interaction_backend"])
+        combined = combine_cuda(summary, arguments.cuda_results, resolved_backend)
         arguments.output_dir.mkdir(parents=True, exist_ok=True)
         rows.to_csv(arguments.output_dir / "per_run.csv", index=False)
         summary.to_csv(arguments.output_dir / "summary.csv", index=False)
@@ -315,6 +358,9 @@ def main() -> int:
             "body_counts": arguments.body_counts,
             "theta": arguments.theta,
             "leaf_capacity": arguments.leaf_capacity,
+            "interaction_backend_requested": arguments.backend,
+            "interaction_backend_used": resolved_backend,
+            "interaction_builder_threads": builder_threads,
             "warmups": arguments.warmups,
             "repetitions": arguments.repetitions,
             "device_requested": arguments.device,

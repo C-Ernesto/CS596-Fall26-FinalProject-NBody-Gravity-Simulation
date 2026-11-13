@@ -99,10 +99,25 @@ def build_hierarchical_interactions(
     theta: float,
     leaf_capacity: int,
     maximum_depth: int,
-) -> dict[str, torch.Tensor | int | float]:
+    interaction_backend: str = "python",
+) -> dict[str, torch.Tensor | int | float | str]:
     """Build target/source interactions with exact leaf particles and aggregate cells."""
-    if theta < 0.0:
-        raise ValueError("theta cannot be negative")
+    if theta < 0.0 or interaction_backend not in {"python", "cpp", "auto"}:
+        raise ValueError("invalid interaction-builder configuration")
+    if interaction_backend in {"cpp", "auto"}:
+        try:
+            from ml import _hierarchical_cpp
+        except ImportError:
+            if interaction_backend == "cpp":
+                raise RuntimeError(
+                    "compiled interaction backend is unavailable; run "
+                    "`python setup_ml_extension.py build_ext --inplace`"
+                ) from None
+            resolved_backend = "python"
+        else:
+            resolved_backend = "cpp"
+    else:
+        resolved_backend = "python"
     if positions.is_cuda:
         torch.cuda.synchronize(positions.device)
     host_copy_started = time.perf_counter()
@@ -111,62 +126,74 @@ def build_hierarchical_interactions(
     host_copy_seconds = time.perf_counter() - host_copy_started
 
     tree_started = time.perf_counter()
-    root = build_octree(positions_cpu, masses_cpu, leaf_capacity, maximum_depth)
+    if resolved_backend == "cpp":
+        arrays = _hierarchical_cpp.build_interactions(
+            positions_cpu,
+            masses_cpu,
+            theta,
+            leaf_capacity,
+            maximum_depth,
+        )
+        target_indices = arrays["target_indices"]
+        source_positions = arrays["source_positions"]
+        source_masses = arrays["source_masses"]
+        source_sizes = arrays["source_sizes"]
+        source_occupancies = arrays["source_occupancies"]
+        source_rms_radii = arrays["source_rms_radii"]
+        aggregate_flags = arrays["is_aggregate"]
+    else:
+        root = build_octree(positions_cpu, masses_cpu, leaf_capacity, maximum_depth)
+        target_indices: list[int] = []
+        source_positions: list[np.ndarray] = []
+        source_masses: list[float] = []
+        source_sizes: list[float] = []
+        source_occupancies: list[int] = []
+        source_rms_radii: list[float] = []
+        aggregate_flags: list[bool] = []
 
-    target_indices: list[int] = []
-    source_positions: list[np.ndarray] = []
-    source_masses: list[float] = []
-    source_sizes: list[float] = []
-    source_occupancies: list[int] = []
-    source_rms_radii: list[float] = []
-    aggregate_flags: list[bool] = []
+        for target_index, target_position in enumerate(positions_cpu):
+            stack: list[tuple[OctreeNode, bool]] = [(root, True)]
+            while stack:
+                node, contains_target = stack.pop()
+                if node.is_leaf:
+                    for source_index in node.indices:
+                        if int(source_index) == target_index:
+                            continue
+                        target_indices.append(target_index)
+                        source_positions.append(positions_cpu[source_index])
+                        source_masses.append(float(masses_cpu[source_index]))
+                        source_sizes.append(0.0)
+                        source_occupancies.append(1)
+                        source_rms_radii.append(0.0)
+                        aggregate_flags.append(False)
+                    continue
 
-    for target_index, target_position in enumerate(positions_cpu):
-        stack: list[tuple[OctreeNode, bool]] = [(root, True)]
-        while stack:
-            node, contains_target = stack.pop()
-            if node.is_leaf:
-                for source_index in node.indices:
-                    if int(source_index) == target_index:
-                        continue
+                distance = float(np.linalg.norm(node.center_of_mass - target_position))
+                node_size = 2.0 * node.half_size
+                if (
+                    not contains_target
+                    and distance > 0.0
+                    and node_size / distance < theta
+                ):
                     target_indices.append(target_index)
-                    source_positions.append(positions_cpu[source_index])
-                    source_masses.append(float(masses_cpu[source_index]))
-                    source_sizes.append(0.0)
-                    source_occupancies.append(1)
-                    source_rms_radii.append(0.0)
-                    aggregate_flags.append(False)
-                continue
+                    source_positions.append(node.center_of_mass)
+                    source_masses.append(node.mass)
+                    source_sizes.append(node_size)
+                    source_occupancies.append(len(node.indices))
+                    source_rms_radii.append(node.rms_radius)
+                    aggregate_flags.append(True)
+                    continue
 
-            distance = float(np.linalg.norm(node.center_of_mass - target_position))
-            node_size = 2.0 * node.half_size
-            if (
-                not contains_target
-                and distance > 0.0
-                and node_size / distance < theta
-            ):
-                target_indices.append(target_index)
-                source_positions.append(node.center_of_mass)
-                source_masses.append(node.mass)
-                source_sizes.append(node_size)
-                source_occupancies.append(len(node.indices))
-                source_rms_radii.append(node.rms_radius)
-                aggregate_flags.append(True)
-                continue
-
-            target_octant = octant_for_position(target_position, node.center)
-            for octant, child in node.children.items():
-                stack.append((child, contains_target and octant == target_octant))
+                target_octant = octant_for_position(target_position, node.center)
+                for octant, child in node.children.items():
+                    stack.append((child, contains_target and octant == target_octant))
 
     tree_seconds = time.perf_counter() - tree_started
 
     device = positions.device
     dtype = positions.dtype
-    source_array = (
-        np.asarray(source_positions, dtype=np.float64).reshape(-1, 3)
-        if source_positions
-        else np.empty((0, 3), dtype=np.float64)
-    )
+    source_array = np.asarray(source_positions, dtype=np.float64).reshape(-1, 3)
+    aggregate_array = np.asarray(aggregate_flags, dtype=np.bool_)
     interaction_transfer_started = time.perf_counter()
     result = {
         "target_indices": torch.tensor(target_indices, dtype=torch.long, device=device),
@@ -181,9 +208,9 @@ def build_hierarchical_interactions(
         "source_rms_radii": torch.tensor(
             source_rms_radii, dtype=dtype, device=device
         ),
-        "is_aggregate": torch.tensor(aggregate_flags, dtype=torch.bool, device=device),
-        "body_interactions": aggregate_flags.count(False),
-        "aggregate_interactions": aggregate_flags.count(True),
+        "is_aggregate": torch.as_tensor(aggregate_array, dtype=torch.bool, device=device),
+        "body_interactions": int((~aggregate_array).sum()),
+        "aggregate_interactions": int(aggregate_array.sum()),
     }
     if positions.is_cuda:
         torch.cuda.synchronize(positions.device)
@@ -194,6 +221,7 @@ def build_hierarchical_interactions(
             "interaction_transfer_seconds": (
                 time.perf_counter() - interaction_transfer_started
             ),
+            "interaction_backend": resolved_backend,
         }
     )
     return result
@@ -210,9 +238,16 @@ class HierarchicalForceModel(nn.Module):
         leaf_capacity: int = 16,
         maximum_depth: int = 24,
         edge_chunk_size: int = 262144,
+        interaction_backend: str = "python",
     ) -> None:
         super().__init__()
-        if theta < 0 or leaf_capacity <= 0 or maximum_depth <= 0 or edge_chunk_size <= 0:
+        if (
+            theta < 0
+            or leaf_capacity <= 0
+            or maximum_depth <= 0
+            or edge_chunk_size <= 0
+            or interaction_backend not in {"python", "cpp", "auto"}
+        ):
             raise ValueError("invalid hierarchical model configuration")
         input_dim = 5
         layers: list[nn.Module] = []
@@ -227,7 +262,8 @@ class HierarchicalForceModel(nn.Module):
         self.leaf_capacity = leaf_capacity
         self.maximum_depth = maximum_depth
         self.edge_chunk_size = edge_chunk_size
-        self.last_interaction_stats: dict[str, float | int] = {}
+        self.interaction_backend = interaction_backend
+        self.last_interaction_stats: dict[str, float | int | str] = {}
 
     def forward(
         self,
@@ -260,6 +296,7 @@ class HierarchicalForceModel(nn.Module):
                 self.theta,
                 self.leaf_capacity,
                 self.maximum_depth,
+                self.interaction_backend,
             )
             build_seconds += time.perf_counter() - build_started
             host_copy_seconds += float(interactions["host_copy_seconds"])
@@ -357,6 +394,7 @@ class HierarchicalForceModel(nn.Module):
             "interaction_transfer_seconds": interaction_transfer_seconds,
             "interaction_seconds": interaction_seconds,
             "momentum_projection_seconds": momentum_projection_seconds,
+            "interaction_backend": str(interactions["interaction_backend"]),
         }
         return output
 

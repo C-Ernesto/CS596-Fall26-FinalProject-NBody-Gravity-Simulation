@@ -83,26 +83,30 @@ Evaluate the first scalable-force prototype:
 the pairwise baseline's learned radial function for accepted far-field
 center-of-mass cells. Setting `theta=0` is the correctness control: it opens
 every cell and matches direct force. Increasing `theta` reduces evaluated
-interactions at the cost of force error. The current CPU/Python tree builder is
-a research prototype and dominates runtime, so these sweeps establish an
-accuracy-versus-work tradeoff rather than a CUDA speedup.
+interactions at the cost of force error. The readable Python tree builder is a
+correctness reference; the compiled C++ backend removes most of its runtime
+overhead. These sweeps still establish an accuracy-versus-work tradeoff rather
+than a CUDA speedup.
 
-Benchmark the complete sparse pipeline, including hierarchy construction,
-transfers, neural evaluation, and momentum projection:
+Build the compiled OpenMP interaction backend, then benchmark the complete
+sparse pipeline, including hierarchy construction, transfers, neural
+evaluation, and momentum projection:
 
 ```powershell
-.\.venv\Scripts\python.exe .\ml\benchmark_hierarchical.py --device cuda
+.\.venv\Scripts\python.exe .\setup_ml_extension.py build_ext --inplace
+.\.venv\Scripts\python.exe .\ml\benchmark_hierarchical.py --backend cpp --device cuda --output-dir results\hierarchical_benchmark_cpp --figure visualization\output\hierarchical_benchmark_cpp.png
 ```
 
 This runs one warm-up and five measured repetitions for N=128 through N=3072,
-writes detailed and median CSV files under `results/hierarchical_benchmark/`,
-and produces `visualization/output/hierarchical_benchmark.png`. The included
+writes detailed and median CSV files under `results/hierarchical_benchmark_cpp/`,
+and produces `visualization/output/hierarchical_benchmark_cpp.png`. The included
 run retained 13.8% of all-pairs interactions at N=3072 with 1.38% relative L2
-force error, but took 1943 ms end to end. The existing tiled-CUDA result at the
-nearest shared scale, N=2048, amortizes to 2.14 ms per simulation step versus
-1056 ms for one sparse Python force prediction. This confirms that
-tree/traversal and interaction packing must be
-optimized before reduced interaction count can become a speedup.
+force error. Moving hierarchy construction, parallel target traversal, and
+packing into C++ reduced N=3072 end-to-end time from 1943 ms to 127.1 ms. At
+N=2048 it reduced time from 1056 ms to 55.5 ms, although the tiled-CUDA result
+still amortizes to 2.14 ms per simulation step. Use `--backend python` for the
+reference implementation, `--backend cpp` to require the extension, or
+`--backend auto` to use it when available.
 
 Fine-tune the aggregate-cell radial network while leaving exact-near forces
 fixed:
