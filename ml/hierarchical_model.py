@@ -191,12 +191,16 @@ class HierarchicalForceModel(nn.Module):
         edge_chunk_size: int = 262144,
         use_geometry_features: bool = True,
         enforce_zero_net_force: bool = False,
+        far_field_mode: str = "learned",
     ) -> None:
         super().__init__()
         if theta < 0 or leaf_capacity <= 0 or maximum_depth <= 0 or edge_chunk_size <= 0:
             raise ValueError("invalid hierarchical model configuration")
+        if far_field_mode not in {"learned", "analytic"}:
+            raise ValueError("far_field_mode must be 'learned' or 'analytic'")
         self.use_geometry_features = use_geometry_features
         self.enforce_zero_net_force = enforce_zero_net_force
+        self.far_field_mode = far_field_mode
         input_dim = 5 if use_geometry_features else 2
         layers: list[nn.Module] = []
         for layer_index in range(hidden_layers):
@@ -263,7 +267,7 @@ class HierarchicalForceModel(nn.Module):
                 )
                 coefficient = source_masses[edge_start:edge_end] * softened_r2.pow(-1.5)
                 aggregate_chunk = aggregates[edge_start:edge_end]
-                if aggregate_chunk.any():
+                if aggregate_chunk.any() and self.far_field_mode == "learned":
                     aggregate_count = int(aggregate_chunk.sum().item())
                     feature_parts = [
                         torch.log(softened_r2[aggregate_chunk].clamp_min(1.0e-12)),

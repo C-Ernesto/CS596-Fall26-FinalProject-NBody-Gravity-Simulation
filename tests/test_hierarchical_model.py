@@ -143,6 +143,35 @@ class HierarchicalForceModelTests(unittest.TestCase):
             atol=2.0e-7,
         )
 
+    def test_analytic_and_learned_modes_use_same_interactions(self) -> None:
+        torch.manual_seed(13)
+        positions = torch.rand(80, 3)
+        masses = torch.rand(80, 1)
+        masses /= masses.sum()
+        arguments = (positions, masses, torch.tensor([0.01]), torch.tensor([0, 80]))
+        learned = HierarchicalForceModel(
+            hidden_dim=8,
+            hidden_layers=1,
+            theta=0.8,
+            leaf_capacity=8,
+            far_field_mode="learned",
+        )
+        analytic = HierarchicalForceModel(
+            hidden_dim=8,
+            hidden_layers=1,
+            theta=0.8,
+            leaf_capacity=8,
+            far_field_mode="analytic",
+        )
+        learned_result = learned(*arguments)
+        analytic_result = analytic(*arguments)
+        self.assertEqual(
+            learned.last_interaction_stats["total_interactions"],
+            analytic.last_interaction_stats["total_interactions"],
+        )
+        self.assertEqual(learned_result.shape, analytic_result.shape)
+        self.assertTrue(torch.isfinite(analytic_result).all())
+
 
 if __name__ == "__main__":
     unittest.main()

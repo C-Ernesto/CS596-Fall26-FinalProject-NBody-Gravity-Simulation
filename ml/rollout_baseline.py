@@ -48,7 +48,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument(
         "--predictor",
-        choices=["learned", "hierarchical", "exact"],
+        choices=["learned", "hierarchical", "barnes_hut", "exact"],
         default="learned",
     )
     parser.add_argument("--theta", type=float)
@@ -107,6 +107,7 @@ def load_model(
                 configuration.get("use_geometry_features", False)
             ),
             enforce_zero_net_force=momentum_correction,
+            far_field_mode="learned",
         )
     else:
         raise ValueError(f"unsupported checkpoint model: {model_name}")
@@ -234,6 +235,18 @@ def main() -> int:
             )
             if arguments.predictor == "hierarchical" and model_name != "hierarchical":
                 raise ValueError("hierarchical predictor requires a hierarchical checkpoint")
+        elif arguments.predictor == "barnes_hut":
+            model_name = "hierarchical"
+            model = HierarchicalForceModel(
+                theta=arguments.theta if arguments.theta is not None else 0.7,
+                leaf_capacity=(
+                    arguments.leaf_capacity
+                    if arguments.leaf_capacity is not None
+                    else 16
+                ),
+                enforce_zero_net_force=arguments.momentum_correction,
+                far_field_mode="analytic",
+            ).to(device).eval()
 
         output_dir = arguments.output_dir or (
             PROJECT_ROOT / "results" / f"rollout_{arguments.predictor}"
@@ -389,6 +402,7 @@ def main() -> int:
             "theta": getattr(model, "theta", None),
             "leaf_capacity": getattr(model, "leaf_capacity", None),
             "momentum_correction": arguments.momentum_correction,
+            "far_field_mode": getattr(model, "far_field_mode", None),
         }
         (output_dir / "config.json").write_text(
             json.dumps(configuration, indent=2), encoding="utf-8"

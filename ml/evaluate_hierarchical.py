@@ -63,6 +63,12 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Subtract mass-weighted mean acceleration to enforce zero net force.",
     )
+    parser.add_argument(
+        "--far-field",
+        choices=["learned", "analytic"],
+        default="learned",
+        help="Use the learned kernel or classical analytical monopole cells.",
+    )
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     return parser.parse_args()
 
@@ -210,6 +216,10 @@ def main() -> int:
         hierarchical_checkpoint = None
         use_geometry_features = True
         if arguments.hierarchical_checkpoint is not None:
+            if arguments.far_field == "analytic":
+                raise ValueError(
+                    "a hierarchical checkpoint is unnecessary with analytic far fields"
+                )
             hierarchical_checkpoint = torch.load(
                 arguments.hierarchical_checkpoint,
                 map_location=device,
@@ -243,10 +253,12 @@ def main() -> int:
                     leaf_capacity=arguments.leaf_capacity,
                     use_geometry_features=use_geometry_features,
                     enforce_zero_net_force=arguments.momentum_correction,
+                    far_field_mode=arguments.far_field,
                 ).to(device)
-                model.load_pairwise_radial_network(pairwise)
-                if hierarchical_checkpoint is not None:
-                    model.load_state_dict(hierarchical_checkpoint["model_state_dict"])
+                if arguments.far_field == "learned":
+                    model.load_pairwise_radial_network(pairwise)
+                    if hierarchical_checkpoint is not None:
+                        model.load_state_dict(hierarchical_checkpoint["model_state_dict"])
                 model.eval()
                 # Exclude one-time CUDA/library initialization from reported timing.
                 sample_row(model, dataset[indices[0]], theta, device)
@@ -277,6 +289,7 @@ def main() -> int:
             "snapshots": len(indices),
             "leaf_capacity": arguments.leaf_capacity,
             "momentum_correction": arguments.momentum_correction,
+            "far_field": arguments.far_field,
         }
         (arguments.output_dir / "run.json").write_text(
             json.dumps(metadata, indent=2), encoding="utf-8"

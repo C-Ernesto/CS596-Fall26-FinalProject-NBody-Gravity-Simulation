@@ -37,6 +37,7 @@ The ML model must reduce the number of interactions. A neural network applied to
 | OpenMP force calculation | Not implemented yet |
 | CPU/GPU crossover analysis | Waiting for serial/OpenMP implementations |
 | Hierarchical exact-near/learned-far model | Geometry features, training, generalization tests, and rollouts implemented |
+| Classical Barnes–Hut matched baseline | Implemented and compared at identical trees and opening angles |
 | CUDA labels validated against independent CPU FP64 | Waiting for serial implementation |
 
 ## Physical and numerical model
@@ -746,6 +747,53 @@ The projection reduces momentum drift by roughly four orders of magnitude and sl
 
 ![Conservative hierarchical rollout errors](visualization/output/rollout_hierarchical_conservative/rollout_errors.png)
 
+### Learned far field versus classical Barnes–Hut
+
+The same octree implementation now supports two far-field modes. `learned` uses the trained radial network for an accepted aggregate cell, while `analytic` uses the classical softened monopole expression. Both modes use the same tree, leaf capacity, opening criterion, exact nearby interactions, FP32 state, momentum correction, and evaluated interaction count. This isolates the aggregate rule rather than comparing unrelated implementations.
+
+At `theta=0.7`, mean relative L2 force errors are:
+
+| Evaluation | Interactions retained | Learned | Classical Barnes–Hut | Classical improvement |
+|---|---:|---:|---:|---:|
+| Validation N=128 | 77.6%–91.2% | 0.609% | **0.229%** | 2.7× lower error |
+| Unseen N=768 | 51.7%–67.9% | 1.97% | **0.356%** | 5.5× lower error |
+| Held-out disk N=256 | 88.3% | 0.723% | **0.172%** | 4.2× lower error |
+
+Classical aggregate evaluation is also cheaper because it does not run a neural network. The current CPU/Python tree construction dominates total time, so these prototype timings should not be interpreted as optimized end-to-end Barnes–Hut performance.
+
+![Matched learned and classical force comparison](visualization/output/far_field_method_comparison.png)
+
+Matched conservative rollouts at `theta=0.7` show the same conclusion:
+
+| Evaluation | Method | Position RMSE | Velocity RMSE | Force RMSE | Energy drift |
+|---|---|---:|---:|---:|---:|
+| Validation N=128 | Learned | 1.964e-5 | 3.436e-4 | 3.994e-3 | 3.092e-5 |
+| Validation N=128 | Classical | **7.340e-6** | **1.774e-4** | **2.365e-3** | **1.239e-5** |
+| Held-out disk N=256 | Learned | 1.549e-4 | 1.803e-3 | 1.084e-2 | 2.976e-4 |
+| Held-out disk N=256 | Classical | **3.669e-5** | **4.036e-4** | **2.341e-3** | **2.040e-4** |
+
+![Learned and classical rollout comparison](visualization/output/far_field_rollout_comparison.png)
+
+The current ML model therefore does not beat a strong classical baseline. This is an important negative result: a neural network should not replace an already accurate analytical monopole with a harder learned approximation. A better ML experiment is to retain the classical monopole and learn only a residual correction associated with finite cell size, anisotropy, or higher multipoles. That residual model must beat the classical curve at the same interaction ratio to justify its additional cost.
+
+Run the classical control with:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\evaluate_hierarchical.py `
+    --far-field analytic --momentum-correction `
+    --theta 0.5,0.7,1.0,1.2 --body-counts 128 --device cuda `
+    --output-dir results\far_field_analytic_validation `
+    --figure visualization\output\far_field_analytic_validation.png
+
+.\.venv\Scripts\python.exe .\ml\rollout_baseline.py `
+    --predictor barnes_hut --theta 0.7 --momentum-correction `
+    --split validation --body-counts 128 --device cuda `
+    --output-dir results\rollout_barnes_hut `
+    --figure-dir visualization\output\rollout_barnes_hut
+
+.\.venv\Scripts\python.exe .\ml\compare_far_field_methods.py
+```
+
 ### Dataset validation status
 
 The current metadata says:
@@ -791,6 +839,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 │   ├── hierarchical_model.py   octree exact-near/learned-far prototype
 │   ├── train_hierarchical.py   aggregate-cell far-field fine-tuning
 │   ├── evaluate_hierarchical.py accuracy-versus-work sweep
+│   ├── compare_far_field_methods.py matched learned/classical analysis
 │   ├── prepare_dataset.py      earlier small-pilot splitter
 │   └── dataset.py              Parquet snapshot loader
 ├── results/                    selected versioned results; other output ignored
@@ -805,7 +854,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 3. Compare serial, OpenMP, naïve CUDA, and tiled CUDA to find the CPU/GPU crossover point.
 4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
 5. Investigate richer anisotropic cell information such as quadrupole tensors; the added scalar geometry features did not consistently improve cross-family transfer.
-6. Compare the learned far-field rule with a classical analytical Barnes–Hut rule at identical opening angles and tree construction cost.
+6. Replace full learned-monopole prediction with a learned residual on top of the analytical Barnes–Hut monopole, then require it to beat the matched classical accuracy/work curve.
 7. Investigate mutual cell-cell interactions or another scheme that conserves angular momentum and pairwise action–reaction, beyond the implemented global momentum projection.
 8. Move octree construction and traversal out of Python, then measure complete end-to-end time against exact CPU and CUDA solvers.
 

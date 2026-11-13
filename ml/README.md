@@ -174,6 +174,21 @@ zero total internal force. Final validation momentum drift fell from `8.03e-5`
 to `8.44e-9`; held-out-disk drift fell from `6.04e-4` to `2.23e-8`. Position,
 velocity, and force errors also improved slightly.
 
+Run the matched classical Barnes–Hut control:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\evaluate_hierarchical.py --far-field analytic --momentum-correction --theta 0.5,0.7,1.0,1.2 --body-counts 128 --device cuda --output-dir results\far_field_analytic_validation --figure visualization\output\far_field_analytic_validation.png
+.\.venv\Scripts\python.exe .\ml\rollout_baseline.py --predictor barnes_hut --theta 0.7 --momentum-correction --split validation --body-counts 128 --device cuda --output-dir results\rollout_barnes_hut --figure-dir visualization\output\rollout_barnes_hut
+.\.venv\Scripts\python.exe .\ml\compare_far_field_methods.py
+```
+
+The analytical and learned modes share the tree, opening test, exact-near
+interactions, momentum correction, precision, and interaction count. Classical
+Barnes–Hut had lower one-step and rollout error on validation N=128, unseen
+N=768, and the held-out disk. The next ML model should preserve the analytical
+monopole and learn a residual multipole correction rather than replacing the
+monopole itself.
+
 This is intentionally named a **candidate** full dataset. Its labels are FP64
 tiled CUDA results sampled against naïve FP64 CUDA, but the metadata remains
 `pre_serial_validation` and `serial_validated: false`. When the independent CPU

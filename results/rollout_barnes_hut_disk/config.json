@@ -1,0 +1,17 @@
+{
+  "predictor": "barnes_hut",
+  "checkpoint": null,
+  "checkpoint_epoch": null,
+  "split": "test",
+  "evaluation_group": "held_out_family",
+  "body_counts": [
+    256
+  ],
+  "trajectories": 4,
+  "device": "cuda",
+  "dtype": "torch.float32",
+  "theta": 0.7,
+  "leaf_capacity": 16,
+  "momentum_correction": true,
+  "far_field_mode": "analytic"
+}

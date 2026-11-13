@@ -1,0 +1,21 @@
+{
+  "checkpoint": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_baseline\\best_model.pt",
+  "checkpoint_epoch": 30,
+  "hierarchical_checkpoint": null,
+  "device": "cuda",
+  "split": "validation",
+  "evaluation_group": null,
+  "body_counts": [
+    128
+  ],
+  "theta": [
+    0.5,
+    0.7,
+    1.0,
+    1.2
+  ],
+  "snapshots": 6,
+  "leaf_capacity": 16,
+  "momentum_correction": true,
+  "far_field": "analytic"
+}
