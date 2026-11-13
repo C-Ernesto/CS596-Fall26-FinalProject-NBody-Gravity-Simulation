@@ -117,6 +117,32 @@ class HierarchicalForceModelTests(unittest.TestCase):
         arguments = (positions, masses, torch.tensor([0.01]), torch.tensor([0, 40]))
         torch.testing.assert_close(legacy(*arguments), geometry(*arguments))
 
+    def test_momentum_correction_enforces_zero_net_force(self) -> None:
+        torch.manual_seed(11)
+        positions = torch.rand(96, 3)
+        masses = torch.rand(96, 1)
+        masses /= masses.sum()
+        model = HierarchicalForceModel(
+            hidden_dim=8,
+            hidden_layers=1,
+            theta=1.0,
+            leaf_capacity=8,
+            enforce_zero_net_force=True,
+        )
+        accelerations = model(
+            positions,
+            masses,
+            torch.tensor([0.01]),
+            torch.tensor([0, 96]),
+        )
+        total_force = (masses * accelerations).sum(dim=0)
+        torch.testing.assert_close(
+            total_force,
+            torch.zeros_like(total_force),
+            rtol=0.0,
+            atol=2.0e-7,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

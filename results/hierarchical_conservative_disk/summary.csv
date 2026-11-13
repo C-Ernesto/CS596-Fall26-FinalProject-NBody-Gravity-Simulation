@@ -1,0 +1,2 @@
+theta,initial_condition,particle_count,mse,rmse,relative_l2,mean_relative_vector_error,mean_cosine_similarity,body_interactions,aggregate_interactions,total_interactions,direct_interactions,interaction_ratio,tree_build_ms,force_evaluation_ms,end_to_end_ms,snapshots
+0.7,rotating_disk,256,0.00017157777134949961,0.013097027978291289,0.00723275353809665,0.011361538898199797,0.9999539256095886,57297.5,337.5,57635.0,65280.0,0.8828890931372549,98.95230000074662,2.213950001532794,101.81600000032631,2

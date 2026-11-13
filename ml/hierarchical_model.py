@@ -190,11 +190,13 @@ class HierarchicalForceModel(nn.Module):
         maximum_depth: int = 24,
         edge_chunk_size: int = 262144,
         use_geometry_features: bool = True,
+        enforce_zero_net_force: bool = False,
     ) -> None:
         super().__init__()
         if theta < 0 or leaf_capacity <= 0 or maximum_depth <= 0 or edge_chunk_size <= 0:
             raise ValueError("invalid hierarchical model configuration")
         self.use_geometry_features = use_geometry_features
+        self.enforce_zero_net_force = enforce_zero_net_force
         input_dim = 5 if use_geometry_features else 2
         layers: list[nn.Module] = []
         for layer_index in range(hidden_layers):
@@ -309,6 +311,12 @@ class HierarchicalForceModel(nn.Module):
             if positions.is_cuda:
                 torch.cuda.synchronize(positions.device)
             interaction_seconds += time.perf_counter() - interaction_started
+            if self.enforce_zero_net_force:
+                total_mass = system_masses.sum().clamp_min(1.0e-12)
+                center_of_mass_acceleration = (
+                    system_masses * system_output
+                ).sum(dim=0) / total_mass
+                system_output = system_output - center_of_mass_acceleration
             output[start:end] = system_output
 
         self.last_interaction_stats = {

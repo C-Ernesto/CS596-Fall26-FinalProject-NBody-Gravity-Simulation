@@ -713,18 +713,38 @@ The geometry-aware model was inserted into velocity-Verlet at `theta=0.7` and ru
 
 For comparison, the fully learned O(N²) pairwise rollout had N=128 position RMSE `4.47e-4`, force RMSE `3.58e-1`, and energy drift `1.62e-3`; its held-out-disk position RMSE was `5.67e-3`. Exact-near interactions make the hierarchical trajectory substantially more accurate, although it retains more interactions at `theta=0.7`.
 
-Momentum conservation is the main newly exposed limitation. The symmetric pairwise model had momentum drift `8.54e-9`, while the hierarchical model reaches `8.03e-5` on validation and `6.04e-4` on the disk. Target-specific tree acceptance does not guarantee equal-and-opposite approximated forces. A conservation-aware traversal, mutual cell-cell interactions, or an explicit momentum correction should be evaluated before long-horizon claims.
+Target-specific tree acceptance does not guarantee equal-and-opposite approximated forces. The uncorrected hierarchical rollout therefore reached momentum drift `8.03e-5` on validation and `6.04e-4` on the disk, compared with `8.54e-9` for the symmetric pairwise model.
+
+An optional O(N) projection now enforces zero total internal force after every hierarchical prediction:
+
+```text
+a_corrected_i = a_i - sum_j(m_j * a_j) / sum_j(m_j)
+```
+
+The same acceleration offset is removed from every body, so relative accelerations are unchanged; it removes only the spurious center-of-mass acceleration. The interaction tree and interaction count are also unchanged. Matched `theta=0.7` rollouts show:
+
+| Evaluation | Version | Position RMSE | Velocity RMSE | Force RMSE | Energy drift | Momentum drift |
+|---|---|---:|---:|---:|---:|---:|
+| Validation N=128 | Uncorrected | 1.982e-5 | 3.476e-4 | 4.045e-3 | 3.094e-5 | 8.027e-5 |
+| Validation N=128 | Corrected | **1.964e-5** | **3.436e-4** | **3.994e-3** | **3.092e-5** | **8.441e-9** |
+| Held-out disk N=256 | Uncorrected | 1.588e-4 | 1.838e-3 | 1.113e-2 | **2.970e-4** | 6.040e-4 |
+| Held-out disk N=256 | Corrected | **1.549e-4** | **1.803e-3** | **1.084e-2** | 2.976e-4 | **2.230e-8** |
+
+The projection reduces momentum drift by roughly four orders of magnitude and slightly improves trajectory and force errors. The disk energy drift changes by less than 0.2%. This fixes global linear-momentum conservation, although it does not enforce pairwise action–reaction or angular-momentum conservation.
+
+![Momentum-conservation comparison](visualization/output/conservation_comparison.png)
 
 ```powershell
 .\.venv\Scripts\python.exe .\ml\rollout_baseline.py `
     --predictor hierarchical `
     --checkpoint results\ml_hierarchical_geometry\best_model.pt `
-    --theta 0.7 --split validation --body-counts 128 --device cuda `
-    --output-dir results\rollout_hierarchical_geometry `
-    --figure-dir visualization\output\rollout_hierarchical_geometry
+    --theta 0.7 --momentum-correction `
+    --split validation --body-counts 128 --device cuda `
+    --output-dir results\rollout_hierarchical_conservative `
+    --figure-dir visualization\output\rollout_hierarchical_conservative
 ```
 
-![Hierarchical rollout errors](visualization/output/rollout_hierarchical_geometry/rollout_errors.png)
+![Conservative hierarchical rollout errors](visualization/output/rollout_hierarchical_conservative/rollout_errors.png)
 
 ### Dataset validation status
 
@@ -785,8 +805,8 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 3. Compare serial, OpenMP, naïve CUDA, and tiled CUDA to find the CPU/GPU crossover point.
 4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
 5. Investigate richer anisotropic cell information such as quadrupole tensors; the added scalar geometry features did not consistently improve cross-family transfer.
-6. Add a conservation-aware interaction scheme or momentum correction and compare its accuracy and cost with the current target-specific traversal.
-7. Move octree construction and traversal out of Python, then measure complete end-to-end time against exact CPU and CUDA solvers.
-8. Compare the learned far-field rule with a classical analytical Barnes–Hut rule at identical opening angles and tree construction cost.
+6. Compare the learned far-field rule with a classical analytical Barnes–Hut rule at identical opening angles and tree construction cost.
+7. Investigate mutual cell-cell interactions or another scheme that conserves angular momentum and pairwise action–reaction, beyond the implemented global momentum projection.
+8. Move octree construction and traversal out of Python, then measure complete end-to-end time against exact CPU and CUDA solvers.
 
 Any ML speedup claim must include graph construction, preprocessing, transfers, and inference. Kernel-only ML timing must not be compared with end-to-end exact-solver timing.

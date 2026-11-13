@@ -53,6 +53,11 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument("--theta", type=float)
     parser.add_argument("--leaf-capacity", type=int)
+    parser.add_argument(
+        "--momentum-correction",
+        action="store_true",
+        help="Enforce zero total internal force for hierarchical predictions.",
+    )
     parser.add_argument("--split", choices=["train", "validation", "test"], default="validation")
     parser.add_argument("--evaluation-group")
     parser.add_argument("--body-counts", type=parse_body_counts, default=[128])
@@ -68,6 +73,7 @@ def load_model(
     device: torch.device,
     theta_override: float | None = None,
     leaf_capacity_override: int | None = None,
+    momentum_correction: bool = False,
 ):
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     configuration = checkpoint["configuration"]
@@ -100,6 +106,7 @@ def load_model(
             use_geometry_features=bool(
                 configuration.get("use_geometry_features", False)
             ),
+            enforce_zero_net_force=momentum_correction,
         )
     else:
         raise ValueError(f"unsupported checkpoint model: {model_name}")
@@ -223,6 +230,7 @@ def main() -> int:
                 device,
                 arguments.theta,
                 arguments.leaf_capacity,
+                arguments.momentum_correction,
             )
             if arguments.predictor == "hierarchical" and model_name != "hierarchical":
                 raise ValueError("hierarchical predictor requires a hierarchical checkpoint")
@@ -380,6 +388,7 @@ def main() -> int:
             "dtype": str(dtype),
             "theta": getattr(model, "theta", None),
             "leaf_capacity": getattr(model, "leaf_capacity", None),
+            "momentum_correction": arguments.momentum_correction,
         }
         (output_dir / "config.json").write_text(
             json.dumps(configuration, indent=2), encoding="utf-8"

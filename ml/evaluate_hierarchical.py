@@ -58,6 +58,11 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--theta", type=parse_float_list, default=[0.0, 0.3, 0.5, 0.7, 1.0])
     parser.add_argument("--snapshots-per-case", type=int, default=2)
     parser.add_argument("--leaf-capacity", type=int, default=16)
+    parser.add_argument(
+        "--momentum-correction",
+        action="store_true",
+        help="Subtract mass-weighted mean acceleration to enforce zero net force.",
+    )
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     return parser.parse_args()
 
@@ -237,6 +242,7 @@ def main() -> int:
                     theta=theta,
                     leaf_capacity=arguments.leaf_capacity,
                     use_geometry_features=use_geometry_features,
+                    enforce_zero_net_force=arguments.momentum_correction,
                 ).to(device)
                 model.load_pairwise_radial_network(pairwise)
                 if hierarchical_checkpoint is not None:
@@ -270,6 +276,7 @@ def main() -> int:
             "theta": arguments.theta,
             "snapshots": len(indices),
             "leaf_capacity": arguments.leaf_capacity,
+            "momentum_correction": arguments.momentum_correction,
         }
         (arguments.output_dir / "run.json").write_text(
             json.dumps(metadata, indent=2), encoding="utf-8"

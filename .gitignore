@@ -91,6 +91,19 @@ CMakeUserPresets.json
 !/results/rollout_hierarchical_geometry_disk/
 !/results/rollout_hierarchical_geometry_disk/*.csv
 !/results/rollout_hierarchical_geometry_disk/*.json
+!/results/hierarchical_conservative_validation/
+!/results/hierarchical_conservative_validation/*.csv
+!/results/hierarchical_conservative_validation/*.json
+!/results/hierarchical_conservative_disk/
+!/results/hierarchical_conservative_disk/*.csv
+!/results/hierarchical_conservative_disk/*.json
+!/results/rollout_hierarchical_conservative/
+!/results/rollout_hierarchical_conservative/*.csv
+!/results/rollout_hierarchical_conservative/*.json
+!/results/rollout_hierarchical_conservative_disk/
+!/results/rollout_hierarchical_conservative_disk/*.csv
+!/results/rollout_hierarchical_conservative_disk/*.json
+!/results/conservation_comparison.csv
 /data/
 /visualization/output/*
 !/visualization/output/.gitkeep
@@ -122,6 +135,13 @@ CMakeUserPresets.json
 !/visualization/output/rollout_hierarchical_geometry/*.png
 !/visualization/output/rollout_hierarchical_geometry_disk/
 !/visualization/output/rollout_hierarchical_geometry_disk/*.png
+!/visualization/output/hierarchical_conservative_validation.png
+!/visualization/output/hierarchical_conservative_disk.png
+!/visualization/output/rollout_hierarchical_conservative/
+!/visualization/output/rollout_hierarchical_conservative/*.png
+!/visualization/output/rollout_hierarchical_conservative_disk/
+!/visualization/output/rollout_hierarchical_conservative_disk/*.png
+!/visualization/output/conservation_comparison.png
 
 # Scheduler and runtime output
 slurm-*.out

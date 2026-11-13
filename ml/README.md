@@ -162,6 +162,18 @@ energy drift was `3.09e-5`, and held-out-disk position RMSE was `1.59e-4`.
 Momentum drift was worse than the symmetric pairwise model because independent
 target-tree traversals do not enforce equal-and-opposite approximate forces.
 
+Enable the O(N) zero-net-force projection with `--momentum-correction`:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\rollout_baseline.py --predictor hierarchical --checkpoint results\ml_hierarchical_geometry\best_model.pt --theta 0.7 --momentum-correction --split validation --body-counts 128 --device cuda --output-dir results\rollout_hierarchical_conservative --figure-dir visualization\output\rollout_hierarchical_conservative
+```
+
+The projection subtracts the mass-weighted mean acceleration from every body.
+It leaves relative acceleration and interaction count unchanged while enforcing
+zero total internal force. Final validation momentum drift fell from `8.03e-5`
+to `8.44e-9`; held-out-disk drift fell from `6.04e-4` to `2.23e-8`. Position,
+velocity, and force errors also improved slightly.
+
 This is intentionally named a **candidate** full dataset. Its labels are FP64
 tiled CUDA results sampled against naïve FP64 CUDA, but the metadata remains
 `pre_serial_validation` and `serial_validated: false`. When the independent CPU
