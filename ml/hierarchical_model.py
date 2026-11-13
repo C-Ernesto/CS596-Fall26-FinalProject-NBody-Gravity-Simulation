@@ -17,6 +17,7 @@ class OctreeNode:
     indices: np.ndarray
     mass: float
     center_of_mass: np.ndarray
+    rms_radius: float
     children: dict[int, "OctreeNode"] = field(default_factory=dict)
 
     @property
@@ -50,12 +51,16 @@ def build_octree(
         center_of_mass = (
             positions[indices] * node_masses[:, None]
         ).sum(axis=0) / mass
+        squared_radii = (positions[indices] - center_of_mass).astype(np.float64)
+        squared_radii = (squared_radii * squared_radii).sum(axis=1)
+        rms_radius = float(np.sqrt((node_masses * squared_radii).sum() / mass))
         node = OctreeNode(
             center=node_center,
             half_size=node_half,
             indices=indices,
             mass=mass,
             center_of_mass=center_of_mass,
+            rms_radius=rms_radius,
         )
         if len(indices) <= leaf_capacity or depth >= maximum_depth:
             return node
@@ -105,6 +110,9 @@ def build_barnes_hut_interactions(
     target_indices: list[int] = []
     source_positions: list[np.ndarray] = []
     source_masses: list[float] = []
+    source_sizes: list[float] = []
+    source_occupancies: list[int] = []
+    source_rms_radii: list[float] = []
     aggregate_flags: list[bool] = []
 
     for target_index, target_position in enumerate(positions_cpu):
@@ -118,6 +126,9 @@ def build_barnes_hut_interactions(
                     target_indices.append(target_index)
                     source_positions.append(positions_cpu[source_index])
                     source_masses.append(float(masses_cpu[source_index]))
+                    source_sizes.append(0.0)
+                    source_occupancies.append(1)
+                    source_rms_radii.append(0.0)
                     aggregate_flags.append(False)
                 continue
 
@@ -131,6 +142,9 @@ def build_barnes_hut_interactions(
                 target_indices.append(target_index)
                 source_positions.append(node.center_of_mass)
                 source_masses.append(node.mass)
+                source_sizes.append(node_size)
+                source_occupancies.append(len(node.indices))
+                source_rms_radii.append(node.rms_radius)
                 aggregate_flags.append(True)
                 continue
 
@@ -151,6 +165,13 @@ def build_barnes_hut_interactions(
             source_array, dtype=dtype, device=device
         ),
         "source_masses": torch.tensor(source_masses, dtype=dtype, device=device),
+        "source_sizes": torch.tensor(source_sizes, dtype=dtype, device=device),
+        "source_occupancies": torch.tensor(
+            source_occupancies, dtype=dtype, device=device
+        ),
+        "source_rms_radii": torch.tensor(
+            source_rms_radii, dtype=dtype, device=device
+        ),
         "is_aggregate": torch.tensor(aggregate_flags, dtype=torch.bool, device=device),
         "body_interactions": aggregate_flags.count(False),
         "aggregate_interactions": aggregate_flags.count(True),
@@ -168,13 +189,18 @@ class HierarchicalForceModel(nn.Module):
         leaf_capacity: int = 16,
         maximum_depth: int = 24,
         edge_chunk_size: int = 262144,
+        use_geometry_features: bool = True,
     ) -> None:
         super().__init__()
         if theta < 0 or leaf_capacity <= 0 or maximum_depth <= 0 or edge_chunk_size <= 0:
             raise ValueError("invalid hierarchical model configuration")
+        self.use_geometry_features = use_geometry_features
+        input_dim = 5 if use_geometry_features else 2
         layers: list[nn.Module] = []
         for layer_index in range(hidden_layers):
-            layers.append(nn.Linear(2 if layer_index == 0 else hidden_dim, hidden_dim))
+            layers.append(
+                nn.Linear(input_dim if layer_index == 0 else hidden_dim, hidden_dim)
+            )
             layers.append(nn.SiLU())
         layers.append(nn.Linear(hidden_dim, 1))
         self.radial_network = nn.Sequential(*layers)
@@ -219,6 +245,9 @@ class HierarchicalForceModel(nn.Module):
             targets = interactions["target_indices"]
             sources = interactions["source_positions"]
             source_masses = interactions["source_masses"]
+            source_sizes = interactions["source_sizes"]
+            source_occupancies = interactions["source_occupancies"]
+            source_rms_radii = interactions["source_rms_radii"]
             aggregates = interactions["is_aggregate"]
             system_output = torch.zeros_like(system_positions)
             interaction_started = time.perf_counter()
@@ -233,15 +262,40 @@ class HierarchicalForceModel(nn.Module):
                 coefficient = source_masses[edge_start:edge_end] * softened_r2.pow(-1.5)
                 aggregate_chunk = aggregates[edge_start:edge_end]
                 if aggregate_chunk.any():
-                    features = torch.stack(
-                        [
-                            torch.log(softened_r2[aggregate_chunk].clamp_min(1.0e-12)),
-                            torch.log(epsilon[system_index].clamp_min(1.0e-12)).expand(
-                                int(aggregate_chunk.sum().item())
-                            ),
-                        ],
-                        dim=1,
-                    )
+                    aggregate_count = int(aggregate_chunk.sum().item())
+                    feature_parts = [
+                        torch.log(softened_r2[aggregate_chunk].clamp_min(1.0e-12)),
+                        torch.log(epsilon[system_index].clamp_min(1.0e-12)).expand(
+                            aggregate_count
+                        ),
+                    ]
+                    if self.use_geometry_features:
+                        distance = torch.sqrt(
+                            displacement[aggregate_chunk]
+                            .square()
+                            .sum(dim=1)
+                            .clamp_min(1.0e-12)
+                        )
+                        feature_parts.extend(
+                            [
+                                torch.log(
+                                    (
+                                        source_sizes[edge_start:edge_end][aggregate_chunk]
+                                        / distance
+                                    ).clamp_min(1.0e-12)
+                                ),
+                                torch.log1p(
+                                    source_occupancies[edge_start:edge_end][aggregate_chunk]
+                                ),
+                                torch.log(
+                                    (
+                                        source_rms_radii[edge_start:edge_end][aggregate_chunk]
+                                        / distance
+                                    ).clamp_min(1.0e-12)
+                                ),
+                            ]
+                        )
+                    features = torch.stack(feature_parts, dim=1)
                     learned_kernel = torch.exp(
                         self.radial_network(features).squeeze(1).clamp(-20.0, 20.0)
                     )
@@ -267,4 +321,14 @@ class HierarchicalForceModel(nn.Module):
         return output
 
     def load_pairwise_radial_network(self, pairwise_model: nn.Module) -> None:
-        self.radial_network.load_state_dict(pairwise_model.radial_network.state_dict())
+        source = pairwise_model.radial_network.state_dict()
+        destination = self.radial_network.state_dict()
+        for name, value in source.items():
+            if destination[name].shape == value.shape:
+                destination[name].copy_(value)
+            elif name == "0.weight" and value.shape[1] == 2:
+                destination[name].zero_()
+                destination[name][:, :2].copy_(value)
+            else:
+                raise ValueError(f"cannot initialize radial-network parameter {name}")
+        self.radial_network.load_state_dict(destination)

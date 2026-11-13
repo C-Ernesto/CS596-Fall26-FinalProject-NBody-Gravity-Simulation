@@ -143,13 +143,24 @@ fixed:
 
 ```powershell
 .\.venv\Scripts\python.exe .\ml\train_hierarchical.py --epochs 10 --theta 1.0 --body-counts 128 --device cuda
-.\.venv\Scripts\python.exe .\ml\evaluate_hierarchical.py --hierarchical-checkpoint results\ml_hierarchical\best_model.pt --theta 0,0.3,0.5,0.7,1.0,1.2 --body-counts 128 --device cuda --output-dir results\hierarchical_sweep_trained --figure visualization\output\hierarchical_tradeoff_trained.png
+.\.venv\Scripts\python.exe .\ml\evaluate_hierarchical.py --hierarchical-checkpoint results\ml_hierarchical_geometry\best_model.pt --theta 0,0.3,0.5,0.7,1.0,1.2 --body-counts 128 --device cuda --output-dir results\hierarchical_geometry_validation --figure visualization\output\hierarchical_geometry_validation.png
 ```
 
-The first run reduced full N=128 validation MSE from `2.94e-4` to `2.14e-4`.
-Transfer to N=768 was mixed across families, indicating that the current
-distance-only aggregate representation should next be extended with cell
-geometry or multipole features.
+The geometry-aware model uses softened distance, softening, cell-size/distance,
+cell occupancy, and RMS-radius/distance. Training reduced full N=128 validation
+MSE from `2.94e-4` to `2.14e-4`, but scalar geometry features did not
+consistently improve N=768 transfer over the distance-only version.
+
+Run the hierarchical model inside velocity-Verlet:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\rollout_baseline.py --predictor hierarchical --checkpoint results\ml_hierarchical_geometry\best_model.pt --theta 0.7 --split validation --body-counts 128 --device cuda --output-dir results\rollout_hierarchical_geometry --figure-dir visualization\output\rollout_hierarchical_geometry
+```
+
+After 175 steps, overall validation position RMSE was `1.98e-5`, relative
+energy drift was `3.09e-5`, and held-out-disk position RMSE was `1.59e-4`.
+Momentum drift was worse than the symmetric pairwise model because independent
+target-tree traversals do not enforce equal-and-opposite approximate forces.
 
 This is intentionally named a **candidate** full dataset. Its labels are FP64
 tiled CUDA results sampled against naïve FP64 CUDA, but the metadata remains

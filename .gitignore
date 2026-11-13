@@ -72,6 +72,25 @@ CMakeUserPresets.json
 !/results/hierarchical_sweep_768_trained/
 !/results/hierarchical_sweep_768_trained/*.csv
 !/results/hierarchical_sweep_768_trained/*.json
+!/results/ml_hierarchical_geometry/
+!/results/ml_hierarchical_geometry/*.csv
+!/results/ml_hierarchical_geometry/*.json
+/results/ml_hierarchical_geometry/*.pt
+!/results/hierarchical_geometry_validation/
+!/results/hierarchical_geometry_validation/*.csv
+!/results/hierarchical_geometry_validation/*.json
+!/results/hierarchical_geometry_768/
+!/results/hierarchical_geometry_768/*.csv
+!/results/hierarchical_geometry_768/*.json
+!/results/hierarchical_geometry_disk/
+!/results/hierarchical_geometry_disk/*.csv
+!/results/hierarchical_geometry_disk/*.json
+!/results/rollout_hierarchical_geometry/
+!/results/rollout_hierarchical_geometry/*.csv
+!/results/rollout_hierarchical_geometry/*.json
+!/results/rollout_hierarchical_geometry_disk/
+!/results/rollout_hierarchical_geometry_disk/*.csv
+!/results/rollout_hierarchical_geometry_disk/*.json
 /data/
 /visualization/output/*
 !/visualization/output/.gitkeep
@@ -95,6 +114,14 @@ CMakeUserPresets.json
 !/visualization/output/ml_hierarchical_history.png
 !/visualization/output/hierarchical_tradeoff_trained.png
 !/visualization/output/hierarchical_tradeoff_768_trained.png
+!/visualization/output/ml_hierarchical_geometry_history.png
+!/visualization/output/hierarchical_geometry_validation.png
+!/visualization/output/hierarchical_geometry_768.png
+!/visualization/output/hierarchical_geometry_disk.png
+!/visualization/output/rollout_hierarchical_geometry/
+!/visualization/output/rollout_hierarchical_geometry/*.png
+!/visualization/output/rollout_hierarchical_geometry_disk/
+!/visualization/output/rollout_hierarchical_geometry_disk/*.png
 
 # Scheduler and runtime output
 slurm-*.out

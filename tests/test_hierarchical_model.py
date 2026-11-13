@@ -4,6 +4,7 @@ import unittest
 
 import torch
 
+from ml.baseline_model import PairwiseForceBaseline
 from ml.hierarchical_model import HierarchicalForceModel
 from ml.rollout import exact_acceleration
 
@@ -91,6 +92,30 @@ class HierarchicalForceModelTests(unittest.TestCase):
         self.assertTrue(gradients)
         self.assertTrue(all(torch.isfinite(gradient).all() for gradient in gradients))
         self.assertGreater(sum(float(gradient.abs().sum()) for gradient in gradients), 0.0)
+
+    def test_pairwise_initialization_preserves_predictions(self) -> None:
+        torch.manual_seed(9)
+        pairwise = PairwiseForceBaseline(hidden_dim=8, hidden_layers=1)
+        legacy = HierarchicalForceModel(
+            hidden_dim=8,
+            hidden_layers=1,
+            theta=1.0,
+            leaf_capacity=4,
+            use_geometry_features=False,
+        )
+        geometry = HierarchicalForceModel(
+            hidden_dim=8,
+            hidden_layers=1,
+            theta=1.0,
+            leaf_capacity=4,
+            use_geometry_features=True,
+        )
+        legacy.load_pairwise_radial_network(pairwise)
+        geometry.load_pairwise_radial_network(pairwise)
+        positions = torch.rand(40, 3)
+        masses = torch.full((40, 1), 1.0 / 40)
+        arguments = (positions, masses, torch.tensor([0.01]), torch.tensor([0, 40]))
+        torch.testing.assert_close(legacy(*arguments), geometry(*arguments))
 
 
 if __name__ == "__main__":

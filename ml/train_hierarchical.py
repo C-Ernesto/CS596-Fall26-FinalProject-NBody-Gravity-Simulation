@@ -34,8 +34,10 @@ from ml.train_baseline import (
 
 DEFAULT_DATASET = PROJECT_ROOT / "data" / "processed" / "candidate_v1"
 DEFAULT_INITIALIZER = PROJECT_ROOT / "results" / "ml_baseline" / "best_model.pt"
-DEFAULT_OUTPUT = PROJECT_ROOT / "results" / "ml_hierarchical"
-DEFAULT_FIGURE = PROJECT_ROOT / "visualization" / "output" / "ml_hierarchical_history.png"
+DEFAULT_OUTPUT = PROJECT_ROOT / "results" / "ml_hierarchical_geometry"
+DEFAULT_FIGURE = (
+    PROJECT_ROOT / "visualization" / "output" / "ml_hierarchical_geometry_history.png"
+)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -144,6 +146,14 @@ def main() -> int:
         configuration.update(
             {
                 "model": "hierarchical",
+                "use_geometry_features": True,
+                "aggregate_features": [
+                    "log_softened_distance_squared",
+                    "log_epsilon",
+                    "log_cell_size_over_distance",
+                    "log1p_cell_occupancy",
+                    "log_rms_radius_over_distance",
+                ],
                 "hidden_dim": int(base_configuration["hidden_dim"]),
                 "hidden_layers": int(base_configuration["hidden_layers"]),
                 "device_used": str(device),

@@ -2,7 +2,7 @@
 
 This project studies the performance of gravitational N-body simulation on CPUs and GPUs and asks whether a machine-learning surrogate can approximate the expensive all-pairs force calculation. The exact direct method requires every body to interact with every other body, so one force evaluation is O(N²). The project currently has working naïve and shared-memory-tiled CUDA implementations, a velocity-Verlet integrator, performance analysis tools, four initial-condition families, a complete candidate ML dataset pipeline, and an initial Barnes–Hut-style exact-near/learned-far force prototype.
 
-The serial CPU and OpenMP CPU implementations remain to be added. The hierarchical ML prototype also needs optimization, training specifically on aggregate cells, and rollout evaluation. Until an independent serial FP64 implementation validates a representative sample of the generated labels, the dataset is deliberately described as a **candidate dataset**, not a frozen final dataset.
+The serial CPU and OpenMP CPU implementations remain to be added. The hierarchical ML prototype has now been trained, evaluated across unseen counts and a held-out family, and tested in 175-step rollouts; its CPU/Python tree builder still needs optimization. Until an independent serial FP64 implementation validates a representative sample of the generated labels, the dataset is deliberately described as a **candidate dataset**, not a frozen final dataset.
 
 ## Research questions
 
@@ -36,7 +36,7 @@ The ML model must reduce the number of interactions. A neural network applied to
 | Serial CPU force calculation | Not implemented yet |
 | OpenMP force calculation | Not implemented yet |
 | CPU/GPU crossover analysis | Waiting for serial/OpenMP implementations |
-| Hierarchical exact-near/learned-far model | Initial prototype implemented and evaluated |
+| Hierarchical exact-near/learned-far model | Geometry features, training, generalization tests, and rollouts implemented |
 | CUDA labels validated against independent CPU FP64 | Waiting for serial implementation |
 
 ## Physical and numerical model
@@ -654,7 +654,18 @@ These results demonstrate the intended accuracy-versus-work tradeoff and show th
 
 The far-field network was then fine-tuned end to end at `theta=1.0` on all 240 N=128 training snapshots. Exact nearby interactions remained fixed; gradients only updated the radial network used by aggregate cells. The inherited pairwise weights had validation MSE `2.94e-4`. The best fine-tuned checkpoint, epoch 10, reached `2.14e-4`, a 27.5% reduction in validation loss. The checkpoint is kept only when it improves over the inherited initialization.
 
-Fine-tuning did not improve every unseen-N case. At N=768 and `theta=0.7`, relative L2 error changed from 2.37% to 1.79% for the two-cluster collision and from 1.20% to 0.735% for the uniform cube, but worsened from 2.21% to 3.34% for the Plummer sphere. This mixed transfer result suggests that distance and softening alone are not enough to represent all aggregate-cell geometry. The next model should add cell size, particle count, and spatial-spread or quadrupole features, then test whether those features improve held-out-family and unseen-N generalization.
+Fine-tuning did not improve every unseen-N case. At N=768 and `theta=0.7`, relative L2 error changed from 2.37% to 1.79% for the two-cluster collision and from 1.20% to 0.735% for the uniform cube, but worsened from 2.21% to 3.34% for the Plummer sphere. This mixed transfer result motivated a geometry-aware version of the aggregate network.
+
+The geometry-aware model adds three rotation- and translation-invariant cell descriptors to softened distance and softening: `log(cell_size / distance)`, `log1p(cell_occupancy)`, and `log(rms_radius / distance)`. The first layer copies the two trained pairwise weights and initializes all new feature weights to zero, so its pre-training predictions exactly match the prior control. After 10 epochs, full N=128 validation MSE improved from `2.94468e-4` to `2.13521e-4`, a 27.5% validation-loss reduction. This is only marginally better than the distance-only fine-tune (`2.13537e-4`), and unseen-N results also changed only slightly. At N=768 and `theta=0.7`, relative L2 force error was 3.38% for the Plummer sphere, 1.76% for the two-cluster collision, and 0.766% for the uniform cube. Therefore these scalar geometry summaries alone did not solve the family-transfer limitation.
+
+The held-out rotating disk gives a useful accuracy/work curve:
+
+| θ | Interactions retained | Relative L2 force error |
+|---:|---:|---:|
+| 0.5 | 97.2% | 0.196% |
+| 0.7 | 88.3% | 0.744% |
+| 1.0 | 62.4% | 2.69% |
+| 1.2 | 51.5% | 3.93% |
 
 Train and evaluate the fine-tuned far field with:
 
@@ -663,14 +674,14 @@ Train and evaluate the fine-tuned far field with:
     --epochs 10 --theta 1.0 --body-counts 128 --device cuda
 
 .\.venv\Scripts\python.exe .\ml\evaluate_hierarchical.py `
-    --hierarchical-checkpoint results\ml_hierarchical\best_model.pt `
+    --hierarchical-checkpoint results\ml_hierarchical_geometry\best_model.pt `
     --theta 0,0.3,0.5,0.7,1.0,1.2 `
     --snapshots-per-case 2 --body-counts 128 --device cuda `
-    --output-dir results\hierarchical_sweep_trained `
-    --figure visualization\output\hierarchical_tradeoff_trained.png
+    --output-dir results\hierarchical_geometry_validation `
+    --figure visualization\output\hierarchical_geometry_validation.png
 ```
 
-The local checkpoint `results/ml_hierarchical/best_model.pt` is ignored by Git, while its configuration, learning history, summary, evaluation tables, and figures are versioned.
+The local checkpoint `results/ml_hierarchical_geometry/best_model.pt` is ignored by Git, while its configuration, learning history, summary, evaluation tables, and figures are versioned.
 
 Run both sweeps with:
 
@@ -690,6 +701,30 @@ Run both sweeps with:
 ![N=128 hierarchical accuracy-work tradeoff](visualization/output/hierarchical_tradeoff.png)
 
 ![N=768 hierarchical accuracy-work tradeoff](visualization/output/hierarchical_tradeoff_768.png)
+
+### Hierarchical rollout evaluation
+
+The geometry-aware model was inserted into velocity-Verlet at `theta=0.7` and run for 175 steps. The N=128 validation result averages all six trajectories:
+
+| Evaluation | Position RMSE | Velocity RMSE | Force RMSE | Relative energy drift | Momentum drift |
+|---|---:|---:|---:|---:|---:|
+| Validation N=128 | **1.98e-5** | **3.48e-4** | **4.05e-3** | **3.09e-5** | 8.03e-5 |
+| Held-out disk N=256 | **1.59e-4** | **1.84e-3** | **1.11e-2** | **2.97e-4** | 6.04e-4 |
+
+For comparison, the fully learned O(N²) pairwise rollout had N=128 position RMSE `4.47e-4`, force RMSE `3.58e-1`, and energy drift `1.62e-3`; its held-out-disk position RMSE was `5.67e-3`. Exact-near interactions make the hierarchical trajectory substantially more accurate, although it retains more interactions at `theta=0.7`.
+
+Momentum conservation is the main newly exposed limitation. The symmetric pairwise model had momentum drift `8.54e-9`, while the hierarchical model reaches `8.03e-5` on validation and `6.04e-4` on the disk. Target-specific tree acceptance does not guarantee equal-and-opposite approximated forces. A conservation-aware traversal, mutual cell-cell interactions, or an explicit momentum correction should be evaluated before long-horizon claims.
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\rollout_baseline.py `
+    --predictor hierarchical `
+    --checkpoint results\ml_hierarchical_geometry\best_model.pt `
+    --theta 0.7 --split validation --body-counts 128 --device cuda `
+    --output-dir results\rollout_hierarchical_geometry `
+    --figure-dir visualization\output\rollout_hierarchical_geometry
+```
+
+![Hierarchical rollout errors](visualization/output/rollout_hierarchical_geometry/rollout_errors.png)
 
 ### Dataset validation status
 
@@ -749,9 +784,9 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 2. Implement OpenMP and measure scaling across thread counts.
 3. Compare serial, OpenMP, naïve CUDA, and tiled CUDA to find the CPU/GPU crossover point.
 4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
-5. Extend aggregate-cell inputs with cell size, occupancy, spatial spread, or quadrupole information and test whether the model transfers consistently across families and N.
-6. Move octree construction and traversal out of Python, then measure complete end-to-end time against exact CPU and CUDA solvers.
-7. Run hierarchical rollouts and evaluate unseen-N and held-out-family generalization, energy drift, and momentum drift.
+5. Investigate richer anisotropic cell information such as quadrupole tensors; the added scalar geometry features did not consistently improve cross-family transfer.
+6. Add a conservation-aware interaction scheme or momentum correction and compare its accuracy and cost with the current target-specific traversal.
+7. Move octree construction and traversal out of Python, then measure complete end-to-end time against exact CPU and CUDA solvers.
 8. Compare the learned far-field rule with a classical analytical Barnes–Hut rule at identical opening angles and tree construction cost.
 
 Any ML speedup claim must include graph construction, preprocessing, transfers, and inference. Kernel-only ML timing must not be compared with end-to-end exact-solver timing.

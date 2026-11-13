@@ -26,6 +26,7 @@ import seaborn as sns
 import torch
 
 from ml.baseline_model import LocalParticleMLP, PairwiseForceBaseline
+from ml.hierarchical_model import HierarchicalForceModel
 from ml.rollout import (
     dimensionless_time_step,
     exact_acceleration,
@@ -45,7 +46,13 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate autoregressive N-body rollouts.")
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
-    parser.add_argument("--predictor", choices=["learned", "exact"], default="learned")
+    parser.add_argument(
+        "--predictor",
+        choices=["learned", "hierarchical", "exact"],
+        default="learned",
+    )
+    parser.add_argument("--theta", type=float)
+    parser.add_argument("--leaf-capacity", type=int)
     parser.add_argument("--split", choices=["train", "validation", "test"], default="validation")
     parser.add_argument("--evaluation-group")
     parser.add_argument("--body-counts", type=parse_body_counts, default=[128])
@@ -56,7 +63,12 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_model(checkpoint_path: Path, device: torch.device):
+def load_model(
+    checkpoint_path: Path,
+    device: torch.device,
+    theta_override: float | None = None,
+    leaf_capacity_override: int | None = None,
+):
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     configuration = checkpoint["configuration"]
     model_name = configuration.get("model", "pairwise")
@@ -66,11 +78,31 @@ def load_model(checkpoint_path: Path, device: torch.device):
             hidden_layers=int(configuration["hidden_layers"]),
             target_chunk_size=int(configuration["target_chunk_size"]),
         )
-    else:
+    elif model_name == "local_mlp":
         model = LocalParticleMLP(
             hidden_dim=int(configuration["hidden_dim"]),
             hidden_layers=int(configuration["hidden_layers"]),
         )
+    elif model_name == "hierarchical":
+        model = HierarchicalForceModel(
+            hidden_dim=int(configuration["hidden_dim"]),
+            hidden_layers=int(configuration["hidden_layers"]),
+            theta=(
+                theta_override
+                if theta_override is not None
+                else float(configuration["theta"])
+            ),
+            leaf_capacity=(
+                leaf_capacity_override
+                if leaf_capacity_override is not None
+                else int(configuration["leaf_capacity"])
+            ),
+            use_geometry_features=bool(
+                configuration.get("use_geometry_features", False)
+            ),
+        )
+    else:
+        raise ValueError(f"unsupported checkpoint model: {model_name}")
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device).eval()
     return model, model_name, checkpoint
@@ -83,7 +115,7 @@ def model_acceleration(
     masses: torch.Tensor,
     epsilon: torch.Tensor,
 ) -> torch.Tensor:
-    if model_name == "pairwise":
+    if model_name in {"pairwise", "hierarchical"}:
         return model(
             positions,
             masses,
@@ -185,8 +217,15 @@ def main() -> int:
         model = None
         model_name = "exact"
         checkpoint = None
-        if arguments.predictor == "learned":
-            model, model_name, checkpoint = load_model(arguments.checkpoint, device)
+        if arguments.predictor in {"learned", "hierarchical"}:
+            model, model_name, checkpoint = load_model(
+                arguments.checkpoint,
+                device,
+                arguments.theta,
+                arguments.leaf_capacity,
+            )
+            if arguments.predictor == "hierarchical" and model_name != "hierarchical":
+                raise ValueError("hierarchical predictor requires a hierarchical checkpoint")
 
         output_dir = arguments.output_dir or (
             PROJECT_ROOT / "results" / f"rollout_{arguments.predictor}"
@@ -339,6 +378,8 @@ def main() -> int:
             "trajectories": len(trajectories),
             "device": str(device),
             "dtype": str(dtype),
+            "theta": getattr(model, "theta", None),
+            "leaf_capacity": getattr(model, "leaf_capacity", None),
         }
         (output_dir / "config.json").write_text(
             json.dumps(configuration, indent=2), encoding="utf-8"

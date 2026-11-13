@@ -202,6 +202,24 @@ def main() -> int:
     try:
         device = choose_device(arguments.device)
         pairwise, checkpoint = load_radial_model(arguments.checkpoint, device)
+        hierarchical_checkpoint = None
+        use_geometry_features = True
+        if arguments.hierarchical_checkpoint is not None:
+            hierarchical_checkpoint = torch.load(
+                arguments.hierarchical_checkpoint,
+                map_location=device,
+                weights_only=False,
+            )
+            hierarchical_configuration = hierarchical_checkpoint.get("configuration", {})
+            if "use_geometry_features" in hierarchical_configuration:
+                use_geometry_features = bool(
+                    hierarchical_configuration["use_geometry_features"]
+                )
+            else:
+                first_weight = hierarchical_checkpoint["model_state_dict"][
+                    "radial_network.0.weight"
+                ]
+                use_geometry_features = first_weight.shape[1] == 5
         dataset = NBodyTorchDataset(
             root=arguments.dataset,
             split=arguments.split,
@@ -218,14 +236,10 @@ def main() -> int:
                     hidden_layers=int(configuration["hidden_layers"]),
                     theta=theta,
                     leaf_capacity=arguments.leaf_capacity,
+                    use_geometry_features=use_geometry_features,
                 ).to(device)
                 model.load_pairwise_radial_network(pairwise)
-                if arguments.hierarchical_checkpoint is not None:
-                    hierarchical_checkpoint = torch.load(
-                        arguments.hierarchical_checkpoint,
-                        map_location=device,
-                        weights_only=False,
-                    )
+                if hierarchical_checkpoint is not None:
                     model.load_state_dict(hierarchical_checkpoint["model_state_dict"])
                 model.eval()
                 # Exclude one-time CUDA/library initialization from reported timing.

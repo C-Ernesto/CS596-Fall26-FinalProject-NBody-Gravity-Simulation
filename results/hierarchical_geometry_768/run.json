@@ -1,0 +1,20 @@
+{
+  "checkpoint": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_baseline\\best_model.pt",
+  "checkpoint_epoch": 30,
+  "hierarchical_checkpoint": "results\\ml_hierarchical_geometry\\best_model.pt",
+  "device": "cuda",
+  "split": "test",
+  "evaluation_group": "interpolation_counts",
+  "body_counts": [
+    768
+  ],
+  "theta": [
+    0.0,
+    0.5,
+    0.7,
+    1.0,
+    1.2
+  ],
+  "snapshots": 3,
+  "leaf_capacity": 16
+}
