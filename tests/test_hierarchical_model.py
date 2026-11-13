@@ -93,31 +93,25 @@ class HierarchicalForceModelTests(unittest.TestCase):
         self.assertTrue(all(torch.isfinite(gradient).all() for gradient in gradients))
         self.assertGreater(sum(float(gradient.abs().sum()) for gradient in gradients), 0.0)
 
-    def test_pairwise_initialization_preserves_predictions(self) -> None:
+    def test_pairwise_initialization_preserves_radial_predictions(self) -> None:
         torch.manual_seed(9)
         pairwise = PairwiseForceBaseline(hidden_dim=8, hidden_layers=1)
-        legacy = HierarchicalForceModel(
+        hierarchical = HierarchicalForceModel(
             hidden_dim=8,
             hidden_layers=1,
             theta=1.0,
             leaf_capacity=4,
-            use_geometry_features=False,
         )
-        geometry = HierarchicalForceModel(
-            hidden_dim=8,
-            hidden_layers=1,
-            theta=1.0,
-            leaf_capacity=4,
-            use_geometry_features=True,
+        hierarchical.load_pairwise_radial_network(pairwise)
+        pair_features = torch.randn(20, 2)
+        geometry_features = torch.randn(20, 3)
+        expected = pairwise.radial_network(pair_features)
+        actual = hierarchical.radial_network(
+            torch.cat([pair_features, geometry_features], dim=1)
         )
-        legacy.load_pairwise_radial_network(pairwise)
-        geometry.load_pairwise_radial_network(pairwise)
-        positions = torch.rand(40, 3)
-        masses = torch.full((40, 1), 1.0 / 40)
-        arguments = (positions, masses, torch.tensor([0.01]), torch.tensor([0, 40]))
-        torch.testing.assert_close(legacy(*arguments), geometry(*arguments))
+        torch.testing.assert_close(actual, expected)
 
-    def test_momentum_correction_enforces_zero_net_force(self) -> None:
+    def test_hierarchical_model_enforces_zero_net_force(self) -> None:
         torch.manual_seed(11)
         positions = torch.rand(96, 3)
         masses = torch.rand(96, 1)
@@ -127,7 +121,6 @@ class HierarchicalForceModelTests(unittest.TestCase):
             hidden_layers=1,
             theta=1.0,
             leaf_capacity=8,
-            enforce_zero_net_force=True,
         )
         accelerations = model(
             positions,
@@ -143,34 +136,6 @@ class HierarchicalForceModelTests(unittest.TestCase):
             atol=2.0e-7,
         )
 
-    def test_analytic_and_learned_modes_use_same_interactions(self) -> None:
-        torch.manual_seed(13)
-        positions = torch.rand(80, 3)
-        masses = torch.rand(80, 1)
-        masses /= masses.sum()
-        arguments = (positions, masses, torch.tensor([0.01]), torch.tensor([0, 80]))
-        learned = HierarchicalForceModel(
-            hidden_dim=8,
-            hidden_layers=1,
-            theta=0.8,
-            leaf_capacity=8,
-            far_field_mode="learned",
-        )
-        analytic = HierarchicalForceModel(
-            hidden_dim=8,
-            hidden_layers=1,
-            theta=0.8,
-            leaf_capacity=8,
-            far_field_mode="analytic",
-        )
-        learned_result = learned(*arguments)
-        analytic_result = analytic(*arguments)
-        self.assertEqual(
-            learned.last_interaction_stats["total_interactions"],
-            analytic.last_interaction_stats["total_interactions"],
-        )
-        self.assertEqual(learned_result.shape, analytic_result.shape)
-        self.assertTrue(torch.isfinite(analytic_result).all())
 
 
 if __name__ == "__main__":

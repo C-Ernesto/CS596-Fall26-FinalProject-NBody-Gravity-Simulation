@@ -4,7 +4,7 @@ import unittest
 
 import torch
 
-from ml.baseline_model import LocalParticleMLP, PairwiseForceBaseline
+from ml.baseline_model import PairwiseForceBaseline
 
 
 class PairwiseForceBaselineTests(unittest.TestCase):
@@ -53,25 +53,6 @@ class PairwiseForceBaselineTests(unittest.TestCase):
             torch.tensor([0, 3]),
         )
         torch.testing.assert_close(rotated, original @ rotation.T)
-
-
-class LocalParticleMLPTests(unittest.TestCase):
-    def test_output_shape_and_finite_values(self) -> None:
-        model = LocalParticleMLP(hidden_dim=16, hidden_layers=2)
-        features = torch.randn(23, 4)
-        predictions = model(features)
-        self.assertEqual(predictions.shape, (23, 3))
-        self.assertTrue(torch.isfinite(predictions).all())
-
-    def test_particles_are_independent(self) -> None:
-        torch.manual_seed(9)
-        model = LocalParticleMLP(hidden_dim=16, hidden_layers=2)
-        features = torch.randn(4, 4)
-        original = model(features)
-        changed = features.clone()
-        changed[1] += 10.0
-        updated = model(changed)
-        torch.testing.assert_close(original[[0, 2, 3]], updated[[0, 2, 3]])
 
 
 if __name__ == "__main__":

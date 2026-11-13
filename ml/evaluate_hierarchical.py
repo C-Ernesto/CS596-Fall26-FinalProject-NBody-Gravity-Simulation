@@ -1,4 +1,4 @@
-"""Sweep the Barnes-Hut opening angle and measure accuracy versus work."""
+"""Sweep the hierarchical opening angle and measure accuracy versus work."""
 
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ from ml.train_baseline import choose_device, parse_body_counts
 
 DEFAULT_DATASET = PROJECT_ROOT / "data" / "processed" / "candidate_v1"
 DEFAULT_CHECKPOINT = PROJECT_ROOT / "results" / "ml_baseline" / "best_model.pt"
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "results" / "hierarchical_sweep"
-DEFAULT_FIGURE = PROJECT_ROOT / "visualization" / "output" / "hierarchical_tradeoff.png"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "results" / "hierarchical_geometry_validation"
+DEFAULT_FIGURE = PROJECT_ROOT / "visualization" / "output" / "hierarchical_geometry_validation.png"
 
 
 def parse_float_list(value: str) -> list[float]:
@@ -41,7 +41,7 @@ def parse_float_list(value: str) -> list[float]:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate exact-near/learned-far Barnes-Hut force prediction."
+        description="Evaluate exact-near/learned-far hierarchical force prediction."
     )
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
@@ -58,17 +58,6 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--theta", type=parse_float_list, default=[0.0, 0.3, 0.5, 0.7, 1.0])
     parser.add_argument("--snapshots-per-case", type=int, default=2)
     parser.add_argument("--leaf-capacity", type=int, default=16)
-    parser.add_argument(
-        "--momentum-correction",
-        action="store_true",
-        help="Subtract mass-weighted mean acceleration to enforce zero net force.",
-    )
-    parser.add_argument(
-        "--far-field",
-        choices=["learned", "analytic"],
-        default="learned",
-        help="Use the learned kernel or classical analytical monopole cells.",
-    )
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     return parser.parse_args()
 
@@ -199,7 +188,7 @@ def plot_tradeoff(summary: pd.DataFrame, destination: Path) -> None:
         legend=False,
         ax=axes[1],
     )
-    axes[1].set_xlabel("Barnes–Hut opening angle θ")
+    axes[1].set_xlabel("Hierarchical opening angle θ")
     axes[1].set_ylabel("Interaction ratio")
     axes[1].set_title("Work removed by hierarchy")
     figure.tight_layout()
@@ -214,27 +203,12 @@ def main() -> int:
         device = choose_device(arguments.device)
         pairwise, checkpoint = load_radial_model(arguments.checkpoint, device)
         hierarchical_checkpoint = None
-        use_geometry_features = True
         if arguments.hierarchical_checkpoint is not None:
-            if arguments.far_field == "analytic":
-                raise ValueError(
-                    "a hierarchical checkpoint is unnecessary with analytic far fields"
-                )
             hierarchical_checkpoint = torch.load(
                 arguments.hierarchical_checkpoint,
                 map_location=device,
                 weights_only=False,
             )
-            hierarchical_configuration = hierarchical_checkpoint.get("configuration", {})
-            if "use_geometry_features" in hierarchical_configuration:
-                use_geometry_features = bool(
-                    hierarchical_configuration["use_geometry_features"]
-                )
-            else:
-                first_weight = hierarchical_checkpoint["model_state_dict"][
-                    "radial_network.0.weight"
-                ]
-                use_geometry_features = first_weight.shape[1] == 5
         dataset = NBodyTorchDataset(
             root=arguments.dataset,
             split=arguments.split,
@@ -251,14 +225,10 @@ def main() -> int:
                     hidden_layers=int(configuration["hidden_layers"]),
                     theta=theta,
                     leaf_capacity=arguments.leaf_capacity,
-                    use_geometry_features=use_geometry_features,
-                    enforce_zero_net_force=arguments.momentum_correction,
-                    far_field_mode=arguments.far_field,
                 ).to(device)
-                if arguments.far_field == "learned":
-                    model.load_pairwise_radial_network(pairwise)
-                    if hierarchical_checkpoint is not None:
-                        model.load_state_dict(hierarchical_checkpoint["model_state_dict"])
+                model.load_pairwise_radial_network(pairwise)
+                if hierarchical_checkpoint is not None:
+                    model.load_state_dict(hierarchical_checkpoint["model_state_dict"])
                 model.eval()
                 # Exclude one-time CUDA/library initialization from reported timing.
                 sample_row(model, dataset[indices[0]], theta, device)
@@ -288,8 +258,6 @@ def main() -> int:
             "theta": arguments.theta,
             "snapshots": len(indices),
             "leaf_capacity": arguments.leaf_capacity,
-            "momentum_correction": arguments.momentum_correction,
-            "far_field": arguments.far_field,
         }
         (arguments.output_dir / "run.json").write_text(
             json.dumps(metadata, indent=2), encoding="utf-8"

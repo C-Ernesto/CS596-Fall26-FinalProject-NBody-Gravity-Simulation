@@ -27,7 +27,7 @@ import pandas as pd
 import torch
 from torch import nn
 
-from ml.baseline_model import LocalParticleMLP, PairwiseForceBaseline
+from ml.baseline_model import PairwiseForceBaseline
 from ml.torch_dataset import make_dataloader
 
 
@@ -48,7 +48,6 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--figure", type=Path)
-    parser.add_argument("--model", choices=["pairwise", "local_mlp"], default="pairwise")
     parser.add_argument("--body-counts", type=parse_body_counts, default=[128])
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--learning-rate", type=float, default=1.0e-3)
@@ -88,17 +87,13 @@ def move_batch(batch: dict, device: torch.device) -> dict:
     }
 
 
-def predict(model: nn.Module, model_name: str, batch: dict) -> torch.Tensor:
-    if model_name == "pairwise":
-        return model(
-            batch["positions"],
-            batch["masses"],
-            batch["epsilon"],
-            batch["ptr"],
-        )
-    if model_name == "local_mlp":
-        return model(batch["node_features"])
-    raise ValueError(f"unknown model: {model_name}")
+def predict(model: nn.Module, batch: dict) -> torch.Tensor:
+    return model(
+        batch["positions"],
+        batch["masses"],
+        batch["epsilon"],
+        batch["ptr"],
+    )
 
 
 def error_sums(predictions: torch.Tensor, targets: torch.Tensor) -> dict[str, float]:
@@ -133,7 +128,6 @@ def run_epoch(
     loss_function: nn.Module,
     device: torch.device,
     optimizer: torch.optim.Optimizer | None,
-    model_name: str = "pairwise",
 ) -> dict[str, float]:
     training = optimizer is not None
     model.train(training)
@@ -151,7 +145,7 @@ def run_epoch(
         if training:
             optimizer.zero_grad(set_to_none=True)
         with torch.set_grad_enabled(training):
-            predictions = predict(model, model_name, batch)
+            predictions = predict(model, batch)
             loss = loss_function(predictions, batch["accelerations"])
             if training:
                 loss.backward()
@@ -204,20 +198,9 @@ def main() -> int:
         set_random_seed(arguments.seed)
         device = choose_device(arguments.device)
         if arguments.output_dir is None:
-            arguments.output_dir = (
-                DEFAULT_OUTPUT
-                if arguments.model == "pairwise"
-                else PROJECT_ROOT / "results" / "ml_local_baseline"
-            )
+            arguments.output_dir = DEFAULT_OUTPUT
         if arguments.figure is None:
-            arguments.figure = (
-                DEFAULT_FIGURE
-                if arguments.model == "pairwise"
-                else PROJECT_ROOT
-                / "visualization"
-                / "output"
-                / "ml_local_baseline_history.png"
-            )
+            arguments.figure = DEFAULT_FIGURE
         output_dir = arguments.output_dir.resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -232,17 +215,11 @@ def main() -> int:
         validation_loader = make_dataloader(
             split="validation", shuffle=False, **loader_arguments
         )
-        if arguments.model == "pairwise":
-            model = PairwiseForceBaseline(
-                hidden_dim=arguments.hidden_dim,
-                hidden_layers=arguments.hidden_layers,
-                target_chunk_size=arguments.target_chunk_size,
-            ).to(device)
-        else:
-            model = LocalParticleMLP(
-                hidden_dim=arguments.hidden_dim,
-                hidden_layers=arguments.hidden_layers,
-            ).to(device)
+        model = PairwiseForceBaseline(
+            hidden_dim=arguments.hidden_dim,
+            hidden_layers=arguments.hidden_layers,
+            target_chunk_size=arguments.target_chunk_size,
+        ).to(device)
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=arguments.learning_rate,
@@ -256,6 +233,7 @@ def main() -> int:
         loss_function = nn.SmoothL1Loss(beta=arguments.huber_beta)
 
         configuration = vars(arguments).copy()
+        configuration["model"] = "pairwise"
         configuration["dataset"] = str(arguments.dataset)
         configuration["output_dir"] = str(output_dir)
         configuration["figure"] = str(arguments.figure)
@@ -276,10 +254,10 @@ def main() -> int:
         for epoch in range(1, arguments.epochs + 1):
             train_loader.batch_sampler.set_epoch(epoch)
             train_metrics = run_epoch(
-                model, train_loader, loss_function, device, optimizer, arguments.model
+                model, train_loader, loss_function, device, optimizer
             )
             validation_metrics = run_epoch(
-                model, validation_loader, loss_function, device, None, arguments.model
+                model, validation_loader, loss_function, device, None
             )
             row = {"epoch": epoch}
             row["learning_rate"] = optimizer.param_groups[0]["lr"]

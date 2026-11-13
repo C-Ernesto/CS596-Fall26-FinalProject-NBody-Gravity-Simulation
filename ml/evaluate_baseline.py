@@ -16,7 +16,7 @@ import pandas as pd
 import torch
 from torch import nn
 
-from ml.baseline_model import LocalParticleMLP, PairwiseForceBaseline
+from ml.baseline_model import PairwiseForceBaseline
 from ml.torch_dataset import make_dataloader
 from ml.train_baseline import (
     choose_device,
@@ -94,18 +94,11 @@ def main() -> int:
             weights_only=False,
         )
         configuration = checkpoint["configuration"]
-        model_name = configuration.get("model", "pairwise")
-        if model_name == "pairwise":
-            model = PairwiseForceBaseline(
-                hidden_dim=int(configuration["hidden_dim"]),
-                hidden_layers=int(configuration["hidden_layers"]),
-                target_chunk_size=int(configuration["target_chunk_size"]),
-            ).to(device)
-        else:
-            model = LocalParticleMLP(
-                hidden_dim=int(configuration["hidden_dim"]),
-                hidden_layers=int(configuration["hidden_layers"]),
-            ).to(device)
+        model = PairwiseForceBaseline(
+            hidden_dim=int(configuration["hidden_dim"]),
+            hidden_layers=int(configuration["hidden_layers"]),
+            target_chunk_size=int(configuration["target_chunk_size"]),
+        ).to(device)
         model.load_state_dict(checkpoint["model_state_dict"])
         model.eval()
         loss_function = nn.SmoothL1Loss(
@@ -139,7 +132,7 @@ def main() -> int:
                         device, non_blocking=True
                     ),
                 }
-                predictions = predict(model, model_name, model_batch)
+                predictions = predict(model, model_batch)
                 for system_index, metadata in enumerate(batch["metadata"]):
                     start = int(batch["ptr"][system_index].item())
                     end = int(batch["ptr"][system_index + 1].item())

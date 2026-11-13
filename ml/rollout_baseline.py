@@ -25,7 +25,7 @@ import pandas as pd
 import seaborn as sns
 import torch
 
-from ml.baseline_model import LocalParticleMLP, PairwiseForceBaseline
+from ml.baseline_model import PairwiseForceBaseline
 from ml.hierarchical_model import HierarchicalForceModel
 from ml.rollout import (
     dimensionless_time_step,
@@ -48,16 +48,11 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument(
         "--predictor",
-        choices=["learned", "hierarchical", "barnes_hut", "exact"],
+        choices=["learned", "hierarchical", "exact"],
         default="learned",
     )
     parser.add_argument("--theta", type=float)
     parser.add_argument("--leaf-capacity", type=int)
-    parser.add_argument(
-        "--momentum-correction",
-        action="store_true",
-        help="Enforce zero total internal force for hierarchical predictions.",
-    )
     parser.add_argument("--split", choices=["train", "validation", "test"], default="validation")
     parser.add_argument("--evaluation-group")
     parser.add_argument("--body-counts", type=parse_body_counts, default=[128])
@@ -73,7 +68,6 @@ def load_model(
     device: torch.device,
     theta_override: float | None = None,
     leaf_capacity_override: int | None = None,
-    momentum_correction: bool = False,
 ):
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     configuration = checkpoint["configuration"]
@@ -83,11 +77,6 @@ def load_model(
             hidden_dim=int(configuration["hidden_dim"]),
             hidden_layers=int(configuration["hidden_layers"]),
             target_chunk_size=int(configuration["target_chunk_size"]),
-        )
-    elif model_name == "local_mlp":
-        model = LocalParticleMLP(
-            hidden_dim=int(configuration["hidden_dim"]),
-            hidden_layers=int(configuration["hidden_layers"]),
         )
     elif model_name == "hierarchical":
         model = HierarchicalForceModel(
@@ -103,11 +92,6 @@ def load_model(
                 if leaf_capacity_override is not None
                 else int(configuration["leaf_capacity"])
             ),
-            use_geometry_features=bool(
-                configuration.get("use_geometry_features", False)
-            ),
-            enforce_zero_net_force=momentum_correction,
-            far_field_mode="learned",
         )
     else:
         raise ValueError(f"unsupported checkpoint model: {model_name}")
@@ -231,22 +215,9 @@ def main() -> int:
                 device,
                 arguments.theta,
                 arguments.leaf_capacity,
-                arguments.momentum_correction,
             )
             if arguments.predictor == "hierarchical" and model_name != "hierarchical":
                 raise ValueError("hierarchical predictor requires a hierarchical checkpoint")
-        elif arguments.predictor == "barnes_hut":
-            model_name = "hierarchical"
-            model = HierarchicalForceModel(
-                theta=arguments.theta if arguments.theta is not None else 0.7,
-                leaf_capacity=(
-                    arguments.leaf_capacity
-                    if arguments.leaf_capacity is not None
-                    else 16
-                ),
-                enforce_zero_net_force=arguments.momentum_correction,
-                far_field_mode="analytic",
-            ).to(device).eval()
 
         output_dir = arguments.output_dir or (
             PROJECT_ROOT / "results" / f"rollout_{arguments.predictor}"
@@ -401,8 +372,6 @@ def main() -> int:
             "dtype": str(dtype),
             "theta": getattr(model, "theta", None),
             "leaf_capacity": getattr(model, "leaf_capacity", None),
-            "momentum_correction": arguments.momentum_correction,
-            "far_field_mode": getattr(model, "far_field_mode", None),
         }
         (output_dir / "config.json").write_text(
             json.dumps(configuration, indent=2), encoding="utf-8"

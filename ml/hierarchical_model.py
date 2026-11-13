@@ -1,4 +1,4 @@
-"""Barnes-Hut-style exact-near/learned-far force approximation."""
+"""Octree-based exact-near/learned-far force approximation."""
 
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ def build_octree(
     return build(np.arange(len(positions), dtype=np.int64), center, half_size, 0)
 
 
-def build_barnes_hut_interactions(
+def build_hierarchical_interactions(
     positions: torch.Tensor,
     masses: torch.Tensor,
     theta: float,
@@ -189,19 +189,11 @@ class HierarchicalForceModel(nn.Module):
         leaf_capacity: int = 16,
         maximum_depth: int = 24,
         edge_chunk_size: int = 262144,
-        use_geometry_features: bool = True,
-        enforce_zero_net_force: bool = False,
-        far_field_mode: str = "learned",
     ) -> None:
         super().__init__()
         if theta < 0 or leaf_capacity <= 0 or maximum_depth <= 0 or edge_chunk_size <= 0:
             raise ValueError("invalid hierarchical model configuration")
-        if far_field_mode not in {"learned", "analytic"}:
-            raise ValueError("far_field_mode must be 'learned' or 'analytic'")
-        self.use_geometry_features = use_geometry_features
-        self.enforce_zero_net_force = enforce_zero_net_force
-        self.far_field_mode = far_field_mode
-        input_dim = 5 if use_geometry_features else 2
+        input_dim = 5
         layers: list[nn.Module] = []
         for layer_index in range(hidden_layers):
             layers.append(
@@ -237,7 +229,7 @@ class HierarchicalForceModel(nn.Module):
             system_positions = positions[start:end]
             system_masses = masses[start:end]
             build_started = time.perf_counter()
-            interactions = build_barnes_hut_interactions(
+            interactions = build_hierarchical_interactions(
                 system_positions,
                 system_masses,
                 self.theta,
@@ -267,7 +259,7 @@ class HierarchicalForceModel(nn.Module):
                 )
                 coefficient = source_masses[edge_start:edge_end] * softened_r2.pow(-1.5)
                 aggregate_chunk = aggregates[edge_start:edge_end]
-                if aggregate_chunk.any() and self.far_field_mode == "learned":
+                if aggregate_chunk.any():
                     aggregate_count = int(aggregate_chunk.sum().item())
                     feature_parts = [
                         torch.log(softened_r2[aggregate_chunk].clamp_min(1.0e-12)),
@@ -275,32 +267,31 @@ class HierarchicalForceModel(nn.Module):
                             aggregate_count
                         ),
                     ]
-                    if self.use_geometry_features:
-                        distance = torch.sqrt(
-                            displacement[aggregate_chunk]
-                            .square()
-                            .sum(dim=1)
-                            .clamp_min(1.0e-12)
-                        )
-                        feature_parts.extend(
-                            [
-                                torch.log(
-                                    (
-                                        source_sizes[edge_start:edge_end][aggregate_chunk]
-                                        / distance
-                                    ).clamp_min(1.0e-12)
-                                ),
-                                torch.log1p(
-                                    source_occupancies[edge_start:edge_end][aggregate_chunk]
-                                ),
-                                torch.log(
-                                    (
-                                        source_rms_radii[edge_start:edge_end][aggregate_chunk]
-                                        / distance
-                                    ).clamp_min(1.0e-12)
-                                ),
-                            ]
-                        )
+                    distance = torch.sqrt(
+                        displacement[aggregate_chunk]
+                        .square()
+                        .sum(dim=1)
+                        .clamp_min(1.0e-12)
+                    )
+                    feature_parts.extend(
+                        [
+                            torch.log(
+                                (
+                                    source_sizes[edge_start:edge_end][aggregate_chunk]
+                                    / distance
+                                ).clamp_min(1.0e-12)
+                            ),
+                            torch.log1p(
+                                source_occupancies[edge_start:edge_end][aggregate_chunk]
+                            ),
+                            torch.log(
+                                (
+                                    source_rms_radii[edge_start:edge_end][aggregate_chunk]
+                                    / distance
+                                ).clamp_min(1.0e-12)
+                            ),
+                        ]
+                    )
                     features = torch.stack(feature_parts, dim=1)
                     learned_kernel = torch.exp(
                         self.radial_network(features).squeeze(1).clamp(-20.0, 20.0)
@@ -315,12 +306,11 @@ class HierarchicalForceModel(nn.Module):
             if positions.is_cuda:
                 torch.cuda.synchronize(positions.device)
             interaction_seconds += time.perf_counter() - interaction_started
-            if self.enforce_zero_net_force:
-                total_mass = system_masses.sum().clamp_min(1.0e-12)
-                center_of_mass_acceleration = (
-                    system_masses * system_output
-                ).sum(dim=0) / total_mass
-                system_output = system_output - center_of_mass_acceleration
+            total_mass = system_masses.sum().clamp_min(1.0e-12)
+            center_of_mass_acceleration = (
+                system_masses * system_output
+            ).sum(dim=0) / total_mass
+            system_output = system_output - center_of_mass_acceleration
             output[start:end] = system_output
 
         self.last_interaction_stats = {

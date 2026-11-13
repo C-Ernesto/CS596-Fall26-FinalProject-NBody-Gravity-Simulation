@@ -1,7 +1,7 @@
 {
-  "predictor": "barnes_hut",
-  "checkpoint": null,
-  "checkpoint_epoch": null,
+  "predictor": "hierarchical",
+  "checkpoint": "results\\ml_hierarchical_geometry\\best_model.pt",
+  "checkpoint_epoch": 10,
   "split": "test",
   "evaluation_group": "held_out_family",
   "body_counts": [
@@ -11,7 +11,5 @@
   "device": "cuda",
   "dtype": "torch.float32",
   "theta": 0.7,
-  "leaf_capacity": 16,
-  "momentum_correction": true,
-  "far_field_mode": "analytic"
+  "leaf_capacity": 16
 }

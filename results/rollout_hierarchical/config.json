@@ -2,15 +2,14 @@
   "predictor": "hierarchical",
   "checkpoint": "results\\ml_hierarchical_geometry\\best_model.pt",
   "checkpoint_epoch": 10,
-  "split": "test",
-  "evaluation_group": "held_out_family",
+  "split": "validation",
+  "evaluation_group": null,
   "body_counts": [
-    256
+    128
   ],
-  "trajectories": 4,
+  "trajectories": 6,
   "device": "cuda",
   "dtype": "torch.float32",
   "theta": 0.7,
-  "leaf_capacity": 16,
-  "momentum_correction": true
+  "leaf_capacity": 16
 }

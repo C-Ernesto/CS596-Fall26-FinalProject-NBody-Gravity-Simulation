@@ -146,7 +146,6 @@ def main() -> int:
         configuration.update(
             {
                 "model": "hierarchical",
-                "use_geometry_features": True,
                 "aggregate_features": [
                     "log_softened_distance_squared",
                     "log_epsilon",

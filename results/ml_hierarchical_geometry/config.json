@@ -18,7 +18,6 @@
   "seed": 12345,
   "device": "cuda",
   "model": "hierarchical",
-  "use_geometry_features": true,
   "aggregate_features": [
     "log_softened_distance_squared",
     "log_epsilon",
