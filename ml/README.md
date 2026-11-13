@@ -138,6 +138,19 @@ interactions at the cost of force error. The current CPU/Python tree builder is
 a research prototype and dominates runtime, so these sweeps establish an
 accuracy-versus-work tradeoff rather than a CUDA speedup.
 
+Fine-tune the aggregate-cell radial network while leaving exact-near forces
+fixed:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\train_hierarchical.py --epochs 10 --theta 1.0 --body-counts 128 --device cuda
+.\.venv\Scripts\python.exe .\ml\evaluate_hierarchical.py --hierarchical-checkpoint results\ml_hierarchical\best_model.pt --theta 0,0.3,0.5,0.7,1.0,1.2 --body-counts 128 --device cuda --output-dir results\hierarchical_sweep_trained --figure visualization\output\hierarchical_tradeoff_trained.png
+```
+
+The first run reduced full N=128 validation MSE from `2.94e-4` to `2.14e-4`.
+Transfer to N=768 was mixed across families, indicating that the current
+distance-only aggregate representation should next be extended with cell
+geometry or multipole features.
+
 This is intentionally named a **candidate** full dataset. Its labels are FP64
 tiled CUDA results sampled against naïve FP64 CUDA, but the metadata remains
 `pre_serial_validation` and `serial_validated: false`. When the independent CPU

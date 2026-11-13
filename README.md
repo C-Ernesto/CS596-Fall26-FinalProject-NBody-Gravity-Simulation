@@ -652,6 +652,26 @@ The zero-angle unit test reproduces direct force to tight floating-point toleran
 
 These results demonstrate the intended accuracy-versus-work tradeoff and show that the interaction reduction improves as N grows. They do **not** yet establish a speedup over tiled CUDA. The current octree and traversal are built in Python on the CPU, and tree construction dominates the reported end-to-end time. A production comparison requires a parallel tree builder, optimized traversal, transfer accounting, and the same hardware/timing protocol as the exact solvers.
 
+The far-field network was then fine-tuned end to end at `theta=1.0` on all 240 N=128 training snapshots. Exact nearby interactions remained fixed; gradients only updated the radial network used by aggregate cells. The inherited pairwise weights had validation MSE `2.94e-4`. The best fine-tuned checkpoint, epoch 10, reached `2.14e-4`, a 27.5% reduction in validation loss. The checkpoint is kept only when it improves over the inherited initialization.
+
+Fine-tuning did not improve every unseen-N case. At N=768 and `theta=0.7`, relative L2 error changed from 2.37% to 1.79% for the two-cluster collision and from 1.20% to 0.735% for the uniform cube, but worsened from 2.21% to 3.34% for the Plummer sphere. This mixed transfer result suggests that distance and softening alone are not enough to represent all aggregate-cell geometry. The next model should add cell size, particle count, and spatial-spread or quadrupole features, then test whether those features improve held-out-family and unseen-N generalization.
+
+Train and evaluate the fine-tuned far field with:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\train_hierarchical.py `
+    --epochs 10 --theta 1.0 --body-counts 128 --device cuda
+
+.\.venv\Scripts\python.exe .\ml\evaluate_hierarchical.py `
+    --hierarchical-checkpoint results\ml_hierarchical\best_model.pt `
+    --theta 0,0.3,0.5,0.7,1.0,1.2 `
+    --snapshots-per-case 2 --body-counts 128 --device cuda `
+    --output-dir results\hierarchical_sweep_trained `
+    --figure visualization\output\hierarchical_tradeoff_trained.png
+```
+
+The local checkpoint `results/ml_hierarchical/best_model.pt` is ignored by Git, while its configuration, learning history, summary, evaluation tables, and figures are versioned.
+
 Run both sweeps with:
 
 ```powershell
@@ -714,6 +734,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 │   ├── rollout.py              integration and physical diagnostics
 │   ├── rollout_baseline.py     exact/learned trajectory evaluation
 │   ├── hierarchical_model.py   octree exact-near/learned-far prototype
+│   ├── train_hierarchical.py   aggregate-cell far-field fine-tuning
 │   ├── evaluate_hierarchical.py accuracy-versus-work sweep
 │   ├── prepare_dataset.py      earlier small-pilot splitter
 │   └── dataset.py              Parquet snapshot loader
@@ -728,7 +749,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 2. Implement OpenMP and measure scaling across thread counts.
 3. Compare serial, OpenMP, naïve CUDA, and tiled CUDA to find the CPU/GPU crossover point.
 4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
-5. Fine-tune the hierarchical model on aggregate-cell examples instead of only reusing pairwise radial weights.
+5. Extend aggregate-cell inputs with cell size, occupancy, spatial spread, or quadrupole information and test whether the model transfers consistently across families and N.
 6. Move octree construction and traversal out of Python, then measure complete end-to-end time against exact CPU and CUDA solvers.
 7. Run hierarchical rollouts and evaluate unseen-N and held-out-family generalization, energy drift, and momentum drift.
 8. Compare the learned far-field rule with a classical analytical Barnes–Hut rule at identical opening angles and tree construction cost.

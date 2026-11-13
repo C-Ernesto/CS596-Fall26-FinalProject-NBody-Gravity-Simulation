@@ -65,6 +65,33 @@ class HierarchicalForceModelTests(unittest.TestCase):
         torch.testing.assert_close(result[:2], expected)
         torch.testing.assert_close(result[2:], expected)
 
+    def test_aggregate_interactions_train_radial_network(self) -> None:
+        torch.manual_seed(7)
+        positions = torch.rand(32, 3)
+        masses = torch.full((32, 1), 1.0 / 32)
+        model = HierarchicalForceModel(
+            hidden_dim=8,
+            hidden_layers=1,
+            theta=1.2,
+            leaf_capacity=4,
+        )
+        predictions = model(
+            positions,
+            masses,
+            torch.tensor([0.01]),
+            torch.tensor([0, 32]),
+        )
+        self.assertGreater(model.last_interaction_stats["aggregate_interactions"], 0)
+        predictions.square().mean().backward()
+        gradients = [
+            parameter.grad
+            for parameter in model.radial_network.parameters()
+            if parameter.grad is not None
+        ]
+        self.assertTrue(gradients)
+        self.assertTrue(all(torch.isfinite(gradient).all() for gradient in gradients))
+        self.assertGreater(sum(float(gradient.abs().sum()) for gradient in gradients), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

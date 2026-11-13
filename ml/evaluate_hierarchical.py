@@ -45,6 +45,11 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
+    parser.add_argument(
+        "--hierarchical-checkpoint",
+        type=Path,
+        help="Optional fine-tuned hierarchical checkpoint; otherwise use pairwise weights.",
+    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--figure", type=Path, default=DEFAULT_FIGURE)
     parser.add_argument("--split", choices=["train", "validation", "test"], default="validation")
@@ -215,6 +220,13 @@ def main() -> int:
                     leaf_capacity=arguments.leaf_capacity,
                 ).to(device)
                 model.load_pairwise_radial_network(pairwise)
+                if arguments.hierarchical_checkpoint is not None:
+                    hierarchical_checkpoint = torch.load(
+                        arguments.hierarchical_checkpoint,
+                        map_location=device,
+                        weights_only=False,
+                    )
+                    model.load_state_dict(hierarchical_checkpoint["model_state_dict"])
                 model.eval()
                 # Exclude one-time CUDA/library initialization from reported timing.
                 sample_row(model, dataset[indices[0]], theta, device)
@@ -232,6 +244,11 @@ def main() -> int:
         metadata = {
             "checkpoint": str(arguments.checkpoint),
             "checkpoint_epoch": int(checkpoint["epoch"]),
+            "hierarchical_checkpoint": (
+                str(arguments.hierarchical_checkpoint)
+                if arguments.hierarchical_checkpoint is not None
+                else None
+            ),
             "device": str(device),
             "split": arguments.split,
             "evaluation_group": arguments.evaluation_group,

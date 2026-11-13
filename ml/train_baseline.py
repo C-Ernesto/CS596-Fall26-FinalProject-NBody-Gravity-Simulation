@@ -166,7 +166,11 @@ def run_epoch(
     return metrics
 
 
-def save_history_plot(history: pd.DataFrame, path: Path) -> None:
+def save_history_plot(
+    history: pd.DataFrame,
+    path: Path,
+    loss_title: str = "Baseline loss",
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     figure, axes = plt.subplots(1, 2, figsize=(12, 4.5))
     axes[0].plot(history["epoch"], history["train_loss"], label="Train")
@@ -174,7 +178,7 @@ def save_history_plot(history: pd.DataFrame, path: Path) -> None:
     axes[0].set_yscale("log")
     axes[0].set_xlabel("Epoch")
     axes[0].set_ylabel("Huber loss")
-    axes[0].set_title("Baseline loss")
+    axes[0].set_title(loss_title)
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
     axes[1].plot(history["epoch"], history["validation_mse"], label="MSE")
