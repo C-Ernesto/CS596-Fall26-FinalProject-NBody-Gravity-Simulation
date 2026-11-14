@@ -726,6 +726,54 @@ both methods under one timing protocol on the same machine and inputs.
 
 ![CUDA-traversed sparse learned-force benchmark](visualization/output/hierarchical_benchmark_cuda.png)
 
+### Paired large-N crossover experiment
+
+The initial CUDA comparison above came from an older simulation benchmark. A
+new force-only CUDA executable now times exactly one tiled FP64 acceleration
+calculation, including allocation, input transfer, kernel execution, output
+transfer, and cleanup. `benchmark_large_n.py` generates one matching
+uniform-cube state and tiled-CUDA acceleration label at each size, then times
+the FP32 sparse model on that same state. Both methods use five measured runs
+after warm-up; model and process startup are excluded.
+
+Build and reproduce the paired experiment with:
+
+```powershell
+cmake --build build-cuda-explicit --config Release `
+    --target nbody_benchmark_force nbody_generate_dataset
+
+.\.venv\Scripts\python.exe .\setup_ml_extension.py build_ext --inplace
+
+.\.venv\Scripts\python.exe .\ml\benchmark_large_n.py `
+    --device cuda `
+    --body-counts 4096,8192,16384,32768,65536 `
+    --regenerate
+```
+
+The RTX 3060 Laptop GPU results show a measured crossover between N=32768 and
+N=65536:
+
+| N | Sparse ML | Exact tiled CUDA | ML / exact | Interactions retained | Relative L2 force error |
+|---:|---:|---:|---:|---:|---:|
+| 4,096 | 22.2 ms | 6.12 ms | 3.63x | 13.51% | 1.25% |
+| 8,192 | 51.5 ms | 18.9 ms | 2.72x | 7.73% | 1.65% |
+| 16,384 | 97.4 ms | 67.6 ms | 1.44x | 2.53% | 1.97% |
+| 32,768 | 301.8 ms | 263.8 ms | 1.14x | 2.22% | 1.92% |
+| 65,536 | **708.7 ms** | **1,056.4 ms** | **0.67x** | **1.25%** | **1.86%** |
+
+At N=65536, the sparse pipeline is 1.49x faster than the complete exact force
+wrapper and also faster than the exact kernel alone (1054 ms). This is evidence
+that reducing interactions can overcome hierarchy and neural-network overhead
+at sufficiently large N on this hardware. It is not yet a universal crossover
+claim: the sweep uses one uniform-cube state per size, FP32 for ML versus FP64
+for the exact solver, and one GPU. Additional families, seeds, GPUs, and
+trajectory rollouts are required before the final conclusion.
+
+Detailed runs, stage medians, configuration, and the joined comparison are in
+`results/large_n_crossover/`.
+
+![Paired large-N crossover](visualization/output/large_n_crossover.png)
+
 ### Hierarchical rollout evaluation
 
 The geometry-aware model was inserted into velocity-Verlet at `theta=0.7` and run for 175 steps. The N=128 validation result averages all six trajectories:
@@ -778,6 +826,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 ├── src/
 │   ├── cuda/                   naïve and tiled CUDA implementations
 │   ├── generate_dataset.cpp    CUDA acceleration-label writer
+│   ├── benchmark_force.cpp     force-only tiled-CUDA timing executable
 │   ├── initial_conditions.cpp  four deterministic system families
 │   └── main.cpp                simulation and benchmark executable
 ├── tests/                      initialization and CUDA correctness tests
@@ -802,6 +851,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 │   ├── train_hierarchical.py   aggregate-cell far-field fine-tuning
 │   ├── evaluate_hierarchical.py accuracy-versus-work sweep
 │   ├── benchmark_hierarchical.py end-to-end sparse-force timing
+│   ├── benchmark_large_n.py    paired large-N crossover experiment
 │   ├── cpp/                    compiled parallel interaction builder
 │   └── dataset.py              Parquet snapshot loader
 ├── results/                    selected versioned results; other output ignored
@@ -815,8 +865,9 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 2. Implement OpenMP and measure scaling across thread counts.
 3. Compare serial, OpenMP, naïve CUDA, and tiled CUDA to find the CPU/GPU crossover point.
 4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
-5. Fuse or streamline CUDA traversal and learned-force evaluation so the variable interaction list does not need to be materialized and reread by separate kernels.
-6. Evaluate the sparse ML model over larger particle counts and longer rollouts while tracking force, trajectory, energy, and momentum error.
-7. Investigate richer cell features only if the current accuracy is insufficient for the target speedup.
+5. Repeat the measured large-N crossover across multiple seeds and all initial-condition families.
+6. Run large-N trajectory rollouts to determine whether the approximately 2% one-step force error remains stable over time.
+7. Fuse or streamline CUDA traversal and learned-force evaluation so the variable interaction list does not need to be materialized and reread by separate kernels.
+8. Investigate richer cell features only if the current accuracy is insufficient for the target speedup.
 
 Any ML speedup claim must include graph construction, preprocessing, transfers, and inference. Kernel-only ML timing must not be compared with end-to-end exact-solver timing.

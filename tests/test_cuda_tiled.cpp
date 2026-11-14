@@ -146,6 +146,33 @@ int main() {
         std::cout << "CUDA tiled 257 test passed\n";
     }
 
+    // Force-only timing must describe the same wrapper used by the paired
+    // large-N crossover benchmark.
+    {
+        const nbody::Bodies timing_bodies = {
+            {-1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5},
+            {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5},
+        };
+        nbody::CudaTiming timing{};
+        const nbody::Accelerations accelerations =
+            nbody::compute_acceleration_cuda_tiled(
+                timing_bodies,
+                0.01,
+                64,
+                &timing
+            );
+        const double measured_components =
+            timing.allocation_ms + timing.host_to_device_ms + timing.kernel_ms +
+            timing.device_to_host_ms + timing.cleanup_ms;
+        if (accelerations.size() != timing_bodies.size() ||
+            timing.allocation_ms <= 0.0 || timing.host_to_device_ms <= 0.0 ||
+            timing.kernel_ms <= 0.0 || timing.device_to_host_ms <= 0.0 ||
+            timing.cleanup_ms <= 0.0 || timing.total_ms < measured_components) {
+            std::cerr << "CUDA tiled force-only timing breakdown is invalid\n";
+            return 1;
+        }
+    }
+
     // ============================================================
     // 1 body motion test 
     // with Initial position: (1, 2, 3), Initial velocity: (0.5, -0.25, 1.0)

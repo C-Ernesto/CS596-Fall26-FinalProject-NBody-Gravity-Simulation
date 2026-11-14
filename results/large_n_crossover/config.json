@@ -1,0 +1,25 @@
+{
+  "body_counts": [
+    4096,
+    8192,
+    16384,
+    32768,
+    65536
+  ],
+  "base_seed": 600000,
+  "theta": 0.7,
+  "leaf_capacity": 16,
+  "block_size": 64,
+  "warmups": 1,
+  "repetitions": 5,
+  "initial_condition": "uniform_cube",
+  "checkpoint": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_hierarchical_geometry\\best_model.pt",
+  "checkpoint_epoch": 10,
+  "raw_snapshots": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\data\\raw\\large_n_crossover.csv",
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 3060 Laptop GPU",
+  "torch_version": "2.11.0+cu128",
+  "cuda_runtime": "12.8",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "comparison_scope": "same initial state and one force evaluation"
+}

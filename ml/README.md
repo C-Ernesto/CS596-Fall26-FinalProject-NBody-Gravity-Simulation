@@ -108,6 +108,21 @@ CUDA reduced it again to 16.3 ms. At N=2048 the CUDA-traversed method takes
 Use `--backend python` for the reference, `cpp` for OpenMP traversal, `cuda` for
 GPU traversal, or `auto` to select the fastest available compatible backend.
 
+Run the paired large-N crossover experiment against one exact tiled-CUDA force
+evaluation on the same initial state:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\benchmark_large_n.py --device cuda --body-counts 4096,8192,16384,32768,65536 --regenerate
+```
+
+On the development RTX 3060 Laptop GPU, sparse ML remained 1.14x slower at
+N=32768 but became 1.49x faster at N=65536. At the crossover point it retained
+1.25% of direct interactions and had 1.86% relative L2 force error. These are
+paired, force-only measurements, but currently cover only one uniform-cube seed
+per size and compare FP32 ML with exact FP64 CUDA. The next validation should
+repeat the crossover across seeds and initial-condition families and test
+trajectory stability.
+
 Fine-tune the aggregate-cell radial network while leaving exact-near forces
 fixed:
 

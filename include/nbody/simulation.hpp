@@ -34,7 +34,8 @@ Accelerations compute_acceleration_cuda_naive(
 Accelerations compute_acceleration_cuda_tiled(
     const Bodies& bodies,
     double epsilon,
-    int block_size
+    int block_size,
+    CudaTiming* timing = nullptr
 );
 
 Bodies simulate_cuda_naive(
