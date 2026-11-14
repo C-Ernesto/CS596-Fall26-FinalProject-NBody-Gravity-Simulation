@@ -6,6 +6,7 @@ import os
 
 import numpy as np
 from setuptools import Extension, setup
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 
 if os.name == "nt":
@@ -27,6 +28,18 @@ setup(
             language="c++",
             extra_compile_args=compile_arguments,
             extra_link_args=link_arguments,
-        )
+        ),
+        CUDAExtension(
+            "ml._hierarchical_cuda",
+            sources=[
+                "ml/cpp/hierarchical_cuda.cpp",
+                "ml/cpp/hierarchical_cuda_kernel.cu",
+            ],
+            extra_compile_args={
+                "cxx": ["/O2", "/std:c++17"] if os.name == "nt" else ["-O3", "-std=c++17"],
+                "nvcc": ["-O3", "--std=c++17"],
+            },
+        ),
     ],
+    cmdclass={"build_ext": BuildExtension.with_options(use_ninja=False)},
 )

@@ -53,6 +53,11 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument("--theta", type=float)
     parser.add_argument("--leaf-capacity", type=int)
+    parser.add_argument(
+        "--interaction-backend",
+        choices=["python", "cpp", "cuda", "auto"],
+        default="auto",
+    )
     parser.add_argument("--split", choices=["train", "validation", "test"], default="validation")
     parser.add_argument("--evaluation-group")
     parser.add_argument("--body-counts", type=parse_body_counts, default=[128])
@@ -68,6 +73,7 @@ def load_model(
     device: torch.device,
     theta_override: float | None = None,
     leaf_capacity_override: int | None = None,
+    interaction_backend: str = "auto",
 ):
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     configuration = checkpoint["configuration"]
@@ -92,6 +98,7 @@ def load_model(
                 if leaf_capacity_override is not None
                 else int(configuration["leaf_capacity"])
             ),
+            interaction_backend=interaction_backend,
         )
     else:
         raise ValueError(f"unsupported checkpoint model: {model_name}")
@@ -215,6 +222,7 @@ def main() -> int:
                 device,
                 arguments.theta,
                 arguments.leaf_capacity,
+                arguments.interaction_backend,
             )
             if arguments.predictor == "hierarchical" and model_name != "hierarchical":
                 raise ValueError("hierarchical predictor requires a hierarchical checkpoint")

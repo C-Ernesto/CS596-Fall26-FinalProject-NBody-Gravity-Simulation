@@ -44,6 +44,43 @@ class HierarchicalForceModelTests(unittest.TestCase):
         )
         torch.testing.assert_close(cpp_result, python_result, rtol=2.0e-5, atol=3.0e-6)
 
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is unavailable")
+    def test_cuda_traversal_matches_cpp_backend(self) -> None:
+        try:
+            from ml import _hierarchical_cpp  # noqa: F401
+            from ml import _hierarchical_cuda  # noqa: F401
+        except ImportError:
+            self.skipTest("optional hierarchy extensions are not built")
+        torch.manual_seed(13)
+        device = torch.device("cuda")
+        positions = torch.rand(128, 3, device=device)
+        masses = torch.rand(128, 1, device=device)
+        masses /= masses.sum()
+        epsilon = torch.tensor([0.01], device=device)
+        ptr = torch.tensor([0, 128], device=device)
+        cpp_model = HierarchicalForceModel(
+            hidden_dim=8,
+            hidden_layers=1,
+            theta=0.7,
+            leaf_capacity=16,
+            interaction_backend="cpp",
+        ).to(device)
+        cuda_model = HierarchicalForceModel(
+            hidden_dim=8,
+            hidden_layers=1,
+            theta=0.7,
+            leaf_capacity=16,
+            interaction_backend="cuda",
+        ).to(device)
+        cuda_model.load_state_dict(cpp_model.state_dict())
+        cpp_result = cpp_model(positions, masses, epsilon, ptr)
+        cuda_result = cuda_model(positions, masses, epsilon, ptr)
+        self.assertEqual(
+            cpp_model.last_interaction_stats["total_interactions"],
+            cuda_model.last_interaction_stats["total_interactions"],
+        )
+        torch.testing.assert_close(cuda_result, cpp_result, rtol=2.0e-5, atol=3.0e-6)
+
     def test_zero_theta_matches_direct_force(self) -> None:
         torch.manual_seed(4)
         positions = torch.randn(17, 3, dtype=torch.float64)

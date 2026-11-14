@@ -49,6 +49,11 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--body-counts", type=parse_body_counts, default=[128])
     parser.add_argument("--theta", type=float, default=1.0)
     parser.add_argument("--leaf-capacity", type=int, default=16)
+    parser.add_argument(
+        "--interaction-backend",
+        choices=["python", "cpp", "cuda", "auto"],
+        default="auto",
+    )
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--learning-rate", type=float, default=1.0e-4)
     parser.add_argument("--minimum-learning-rate", type=float, default=1.0e-6)
@@ -117,6 +122,7 @@ def main() -> int:
             hidden_layers=int(base_configuration["hidden_layers"]),
             theta=arguments.theta,
             leaf_capacity=arguments.leaf_capacity,
+            interaction_backend=arguments.interaction_backend,
         ).to(device)
         model.load_pairwise_radial_network(pairwise)
 

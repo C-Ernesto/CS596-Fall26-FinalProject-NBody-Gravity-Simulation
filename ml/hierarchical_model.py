@@ -102,9 +102,38 @@ def build_hierarchical_interactions(
     interaction_backend: str = "python",
 ) -> dict[str, torch.Tensor | int | float | str]:
     """Build target/source interactions with exact leaf particles and aggregate cells."""
-    if theta < 0.0 or interaction_backend not in {"python", "cpp", "auto"}:
+    if theta < 0.0 or interaction_backend not in {"python", "cpp", "cuda", "auto"}:
         raise ValueError("invalid interaction-builder configuration")
-    if interaction_backend in {"cpp", "auto"}:
+    resolved_backend = interaction_backend
+    if interaction_backend == "auto" and positions.is_cuda:
+        try:
+            from ml import _hierarchical_cuda
+        except ImportError:
+            pass
+        else:
+            resolved_backend = "cuda"
+    if resolved_backend == "cuda":
+        if not positions.is_cuda:
+            raise RuntimeError("CUDA interaction backend requires CUDA tensors")
+        try:
+            from ml import _hierarchical_cuda
+        except ImportError:
+            raise RuntimeError(
+                "CUDA interaction backend is unavailable; run "
+                "`python setup_ml_extension.py build_ext --inplace`"
+            ) from None
+        result = dict(
+            _hierarchical_cuda.build_interactions(
+                positions,
+                masses,
+                theta,
+                leaf_capacity,
+                maximum_depth,
+            )
+        )
+        result["interaction_backend"] = "cuda"
+        return result
+    if resolved_backend in {"cpp", "auto"}:
         try:
             from ml import _hierarchical_cpp
         except ImportError:
@@ -221,6 +250,7 @@ def build_hierarchical_interactions(
             "interaction_transfer_seconds": (
                 time.perf_counter() - interaction_transfer_started
             ),
+            "gpu_traversal_seconds": 0.0,
             "interaction_backend": resolved_backend,
         }
     )
@@ -246,7 +276,7 @@ class HierarchicalForceModel(nn.Module):
             or leaf_capacity <= 0
             or maximum_depth <= 0
             or edge_chunk_size <= 0
-            or interaction_backend not in {"python", "cpp", "auto"}
+            or interaction_backend not in {"python", "cpp", "cuda", "auto"}
         ):
             raise ValueError("invalid hierarchical model configuration")
         input_dim = 5
@@ -281,6 +311,7 @@ class HierarchicalForceModel(nn.Module):
         host_copy_seconds = 0.0
         tree_seconds = 0.0
         interaction_transfer_seconds = 0.0
+        gpu_traversal_seconds = 0.0
         interaction_seconds = 0.0
         momentum_projection_seconds = 0.0
 
@@ -304,6 +335,7 @@ class HierarchicalForceModel(nn.Module):
             interaction_transfer_seconds += float(
                 interactions["interaction_transfer_seconds"]
             )
+            gpu_traversal_seconds += float(interactions["gpu_traversal_seconds"])
             total_body += int(interactions["body_interactions"])
             total_aggregate += int(interactions["aggregate_interactions"])
 
@@ -392,6 +424,7 @@ class HierarchicalForceModel(nn.Module):
             "host_copy_seconds": host_copy_seconds,
             "tree_seconds": tree_seconds,
             "interaction_transfer_seconds": interaction_transfer_seconds,
+            "gpu_traversal_seconds": gpu_traversal_seconds,
             "interaction_seconds": interaction_seconds,
             "momentum_projection_seconds": momentum_projection_seconds,
             "interaction_backend": str(interactions["interaction_backend"]),

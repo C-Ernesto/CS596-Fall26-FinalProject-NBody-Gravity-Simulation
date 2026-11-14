@@ -2,7 +2,7 @@
 
 This project studies the performance of gravitational N-body simulation on CPUs and GPUs and asks whether a machine-learning surrogate can reduce the work of the expensive all-pairs force calculation while retaining useful accuracy. The exact direct method requires every body to interact with every other body, so one force evaluation is O(N²). The project currently has working naïve and shared-memory-tiled CUDA implementations, a velocity-Verlet integrator, performance analysis tools, four initial-condition families, a complete candidate ML dataset pipeline, and an octree-based exact-near/learned-far force prototype.
 
-The serial CPU and OpenMP CPU implementations remain to be added. The hierarchical ML prototype has now been trained, evaluated across unseen counts and a held-out family, tested in 175-step rollouts, and accelerated with a compiled OpenMP interaction builder. Until an independent serial FP64 implementation validates a representative sample of the generated labels, the dataset is deliberately described as a **candidate dataset**, not a frozen final dataset.
+The serial CPU and OpenMP CPU implementations remain to be added. The hierarchical ML prototype has now been trained, evaluated across unseen counts and a held-out family, tested in 175-step rollouts, and accelerated with compiled CPU and CUDA interaction builders. Until an independent serial FP64 implementation validates a representative sample of the generated labels, the dataset is deliberately described as a **candidate dataset**, not a frozen final dataset.
 
 ## Research questions
 
@@ -37,6 +37,7 @@ The ML model must reduce the number of interactions. A neural network applied to
 | CPU/GPU crossover analysis | Waiting for serial/OpenMP implementations |
 | Hierarchical exact-near/learned-far model | Geometry features, training, generalization tests, and rollouts implemented |
 | Compiled hierarchy and interaction builder | Implemented in C++ with parallel target traversal |
+| CUDA hierarchy traversal and interaction packing | Implemented and checked against the CPU builder |
 | CUDA labels validated against independent CPU FP64 | Waiting for serial implementation |
 
 ## Physical and numerical model
@@ -671,16 +672,17 @@ warm-up followed by five measured repetitions and reports medians:
 ```powershell
 .\.venv\Scripts\python.exe .\setup_ml_extension.py build_ext --inplace
 .\.venv\Scripts\python.exe .\ml\benchmark_hierarchical.py `
-    --backend cpp --device cuda `
-    --output-dir results\hierarchical_benchmark_cpp `
-    --figure visualization\output\hierarchical_benchmark_cpp.png
+    --backend cuda --device cuda `
+    --output-dir results\hierarchical_benchmark_cuda `
+    --figure visualization\output\hierarchical_benchmark_cuda.png
 ```
 
-The first command builds the optional native C++ interaction builder. On
-Windows it uses MSVC and OpenMP; on Linux it uses a C++17 compiler with OpenMP.
-The model keeps the Python implementation as a readable correctness reference.
-Use `--backend python` or `--backend cpp` to select one explicitly; `auto` uses
-the compiled backend when it is available.
+The first command builds both optional native backends. The CPU backend uses
+C++17 and OpenMP. The CUDA backend keeps compact tree construction on the CPU,
+transfers that small tree, then counts and packs interactions with two CUDA
+traversal passes. The full variable-length interaction list is created directly
+on the GPU. Use `--backend python`, `cpp`, or `cuda` to select explicitly;
+`auto` prefers CUDA for CUDA tensors and otherwise falls back safely.
 
 The default sweep uses one deterministic uniform-cube snapshot at each
 available size from N=128 through N=3072. Detailed repetitions are written to
@@ -694,21 +696,22 @@ On the RTX 3060 Laptop GPU used for the included run, the sparse method retained
 error was 0.37% and 1.38%, respectively. The compiled backend preserves those
 results while substantially reducing runtime:
 
-| N | Python builder | Compiled builder | End-to-end speedup |
-|---:|---:|---:|---:|
-| 128 | 25.0 ms | 4.31 ms | 5.8x |
-| 512 | 263.9 ms | 13.4 ms | 19.6x |
-| 1,024 | 581.0 ms | 37.2 ms | 15.6x |
-| 2,048 | 1,056 ms | 55.5 ms | 19.0x |
-| 3,072 | 1,943 ms | 127.1 ms | 15.3x |
+| N | Python builder | Compiled CPU | CUDA traversal | Python→CUDA speedup |
+|---:|---:|---:|---:|---:|
+| 128 | 25.0 ms | 4.31 ms | 3.61 ms | 6.9x |
+| 512 | 263.9 ms | 13.4 ms | 5.38 ms | 49.1x |
+| 1,024 | 581.0 ms | 37.2 ms | 9.49 ms | 61.2x |
+| 2,048 | 1,056 ms | 55.5 ms | 12.1 ms | 87.2x |
+| 3,072 | 1,943 ms | 127.1 ms | 16.3 ms | 119.5x |
 
-The compiled builder constructs and traverses the same octree in C++, processes
-targets in parallel with OpenMP, and packs contiguous NumPy arrays before the
-existing PyTorch transfer. The included run used 16 builder threads. At N=3072,
-hierarchy time fell from 1139 ms to 91.3 ms. The result is still **not a runtime
-speedup over tiled CUDA**: at the overlapping N=2048 point, one sparse
-prediction takes 55.5 ms while the existing tiled-CUDA benchmark amortizes to
-2.14 ms per simulation step.
+The CUDA backend preserves the CPU builder's interaction counts and changes
+accelerations only by normal floating-point accumulation-order noise. At
+N=3072, compact CPU tree construction takes 0.49 ms, compact-tree transfer takes
+0.40 ms, CUDA traversal takes 2.15 ms, and force evaluation takes 12.3 ms. The
+result is still **not a runtime speedup over tiled CUDA** at shared sizes: at
+N=2048, one sparse prediction takes 12.1 ms while the existing tiled-CUDA
+benchmark amortizes to 2.14 ms per simulation step. The gap has nevertheless
+fallen from roughly 493x for the Python prototype to 5.7x.
 
 The CUDA line divides each existing 10-step runtime by ten to report an
 amortized per-step value. It is an independent benchmark rather than a paired
@@ -720,6 +723,8 @@ both methods under one timing protocol on the same machine and inputs.
 ![Sparse learned-force benchmark](visualization/output/hierarchical_benchmark.png)
 
 ![Compiled sparse learned-force benchmark](visualization/output/hierarchical_benchmark_cpp.png)
+
+![CUDA-traversed sparse learned-force benchmark](visualization/output/hierarchical_benchmark_cuda.png)
 
 ### Hierarchical rollout evaluation
 
@@ -810,7 +815,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 2. Implement OpenMP and measure scaling across thread counts.
 3. Compare serial, OpenMP, naïve CUDA, and tiled CUDA to find the CPU/GPU crossover point.
 4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
-5. Move the now-compiled CPU hierarchy and interaction arrays onto the GPU to remove host traversal and CPU-to-GPU interaction-list transfer.
+5. Fuse or streamline CUDA traversal and learned-force evaluation so the variable interaction list does not need to be materialized and reread by separate kernels.
 6. Evaluate the sparse ML model over larger particle counts and longer rollouts while tracking force, trajectory, energy, and momentum error.
 7. Investigate richer cell features only if the current accuracy is insufficient for the target speedup.
 

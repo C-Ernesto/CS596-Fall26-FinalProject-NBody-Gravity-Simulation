@@ -88,25 +88,25 @@ correctness reference; the compiled C++ backend removes most of its runtime
 overhead. These sweeps still establish an accuracy-versus-work tradeoff rather
 than a CUDA speedup.
 
-Build the compiled OpenMP interaction backend, then benchmark the complete
+Build the compiled OpenMP and CUDA interaction backends, then benchmark the complete
 sparse pipeline, including hierarchy construction, transfers, neural
 evaluation, and momentum projection:
 
 ```powershell
 .\.venv\Scripts\python.exe .\setup_ml_extension.py build_ext --inplace
-.\.venv\Scripts\python.exe .\ml\benchmark_hierarchical.py --backend cpp --device cuda --output-dir results\hierarchical_benchmark_cpp --figure visualization\output\hierarchical_benchmark_cpp.png
+.\.venv\Scripts\python.exe .\ml\benchmark_hierarchical.py --backend cuda --device cuda --output-dir results\hierarchical_benchmark_cuda --figure visualization\output\hierarchical_benchmark_cuda.png
 ```
 
 This runs one warm-up and five measured repetitions for N=128 through N=3072,
-writes detailed and median CSV files under `results/hierarchical_benchmark_cpp/`,
-and produces `visualization/output/hierarchical_benchmark_cpp.png`. The included
+writes detailed and median CSV files under `results/hierarchical_benchmark_cuda/`,
+and produces `visualization/output/hierarchical_benchmark_cuda.png`. The included
 run retained 13.8% of all-pairs interactions at N=3072 with 1.38% relative L2
-force error. Moving hierarchy construction, parallel target traversal, and
-packing into C++ reduced N=3072 end-to-end time from 1943 ms to 127.1 ms. At
-N=2048 it reduced time from 1056 ms to 55.5 ms, although the tiled-CUDA result
-still amortizes to 2.14 ms per simulation step. Use `--backend python` for the
-reference implementation, `--backend cpp` to require the extension, or
-`--backend auto` to use it when available.
+force error. Moving hierarchy construction and packing into C++ reduced N=3072
+from 1943 ms to 127.1 ms; moving traversal and interaction-list creation onto
+CUDA reduced it again to 16.3 ms. At N=2048 the CUDA-traversed method takes
+12.1 ms, while the existing tiled-CUDA result amortizes to 2.14 ms per step.
+Use `--backend python` for the reference, `cpp` for OpenMP traversal, `cuda` for
+GPU traversal, or `auto` to select the fastest available compatible backend.
 
 Fine-tune the aggregate-cell radial network while leaving exact-near forces
 fixed:

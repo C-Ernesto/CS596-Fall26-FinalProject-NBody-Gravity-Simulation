@@ -47,7 +47,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--theta", type=float, default=0.7)
     parser.add_argument("--leaf-capacity", type=int, default=16)
     parser.add_argument(
-        "--backend", choices=["python", "cpp", "auto"], default="auto"
+        "--backend", choices=["python", "cpp", "cuda", "auto"], default="auto"
     )
     parser.add_argument(
         "--builder-threads",
@@ -145,6 +145,7 @@ def run_once(
         "interaction_transfer_ms": 1000.0 * float(
             stats["interaction_transfer_seconds"]
         ),
+        "gpu_traversal_ms": 1000.0 * float(stats["gpu_traversal_seconds"]),
         "force_evaluation_ms": 1000.0 * float(stats["interaction_seconds"]),
         "momentum_projection_ms": 1000.0 * float(
             stats["momentum_projection_seconds"]
@@ -238,6 +239,7 @@ def plot_results(summary: pd.DataFrame, combined: pd.DataFrame, destination: Pat
             "tree_input_copy_ms",
             "tree_build_ms",
             "interaction_transfer_ms",
+            "gpu_traversal_ms",
             "force_evaluation_ms",
             "momentum_projection_ms",
         ],
