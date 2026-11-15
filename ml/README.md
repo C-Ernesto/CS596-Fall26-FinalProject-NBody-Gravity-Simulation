@@ -160,6 +160,21 @@ Re-evaluate it using the existing exact timings:
 .\.venv\Scripts\python.exe .\ml\benchmark_crossover_matrix.py --device cuda --checkpoint results\ml_hierarchical_large_n\best_model.pt --output-dir results\crossover_matrix_large_trained --figure visualization\output\crossover_matrix_large_trained.png --exact-results-dir results\crossover_matrix
 ```
 
+The corrected training mode normalizes the Huber loss by each snapshot's RMS
+target force, averages snapshots equally, and selects using per-family
+validation results. A regression guard prevents an improved average from hiding
+damage to one trained family:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\train_hierarchical.py --initializer results\ml_hierarchical_geometry\best_model.pt --output-dir results\ml_hierarchical_balanced_guarded --figure visualization\output\ml_hierarchical_balanced_guarded_history.png --body-counts 512,1024,2048 --theta 0.7 --interaction-backend cuda --epochs 10 --learning-rate 2e-5 --minimum-learning-rate 1e-6 --loss-mode snapshot_relative_huber --checkpoint-selection mean_family_relative_l2 --maximum-family-regression 0.15 --max-snapshots 1 --max-particles 2048 --training-snapshots-per-case 8 --validation-snapshots-per-case 4 --device cuda
+```
+
+This selected epoch 3. Compared with the original checkpoint, large-N Plummer
+error improved about 30% and collision error improved 37%–40%; uniform was
+1.82% at N=32768 and 2.28% at N=65536. The held-out disk still regressed by
+11%–17%, so the guarded model is a useful structured-family candidate rather
+than the new default. The disk remains excluded from model selection.
+
 Fine-tune the aggregate-cell radial network while leaving exact-near forces
 fixed:
 

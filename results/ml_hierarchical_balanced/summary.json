@@ -1,0 +1,45 @@
+{
+  "initializer_validation_metrics": {
+    "mse": 0.0005880144645267311,
+    "mae": 0.014753322963351531,
+    "mean_relative_vector_error": 0.05588259194268003,
+    "mean_cosine_similarity": 0.999898727451052,
+    "loss": 0.0005560253457525101,
+    "relative_l2": 0.02332801305903778,
+    "mean_family_relative_l2": 0.02988121818588091,
+    "worst_family_relative_l2": 0.05168266897891014
+  },
+  "initializer_validation_metrics_by_family": {
+    "plummer_sphere": {
+      "mse": 0.00012405769969821753,
+      "mae": 0.008501782470072309,
+      "mean_relative_vector_error": 0.10357138807220119,
+      "mean_cosine_similarity": 0.9998593309095928,
+      "loss": 0.0011728136729895293,
+      "relative_l2": 0.05168266897891014
+    },
+    "two_cluster_collision": {
+      "mse": 0.0015360766902588131,
+      "mae": 0.02749256756422775,
+      "mean_relative_vector_error": 0.052224022935011556,
+      "mean_cosine_similarity": 0.9998663067817688,
+      "loss": 0.00046022723472560756,
+      "relative_l2": 0.029401034605343622
+    },
+    "uniform_cube": {
+      "mse": 0.00010390900362316253,
+      "mae": 0.008265618855754534,
+      "mean_relative_vector_error": 0.01185236482082733,
+      "mean_cosine_similarity": 0.9999705446617944,
+      "loss": 3.5035129542393406e-05,
+      "relative_l2": 0.008559950973388965
+    }
+  },
+  "checkpoint_selection": "mean_family_relative_l2",
+  "initializer_selection_score": 0.02988121818588091,
+  "best_selection_score": 0.020619672791945744,
+  "best_epoch": 9,
+  "improved_over_initializer": true,
+  "relative_selection_improvement": 0.3099453755975488,
+  "elapsed_seconds": 29.93945249999979
+}

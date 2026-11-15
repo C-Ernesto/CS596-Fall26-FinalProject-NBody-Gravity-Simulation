@@ -877,6 +877,62 @@ Reproduce the paired evaluation while reusing the existing exact timings with:
 
 ![Large-N fine-tuning crossover](visualization/output/crossover_matrix_large_trained.png)
 
+#### Family-balanced loss and guarded checkpoint selection
+
+The follow-up uses a snapshot-relative Huber loss. Each snapshot's prediction
+and target are divided by that snapshot's RMS target acceleration before the
+loss is computed, and snapshot losses are averaged equally. This prevents a
+high-force family from dominating solely because of its physical scale. The
+trainer also records per-family validation metrics and can reject any epoch
+that regresses too far from the initializer on a trained family.
+
+The selected guarded run used mean family relative L2 as its objective and a
+15% maximum family-regression threshold:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\train_hierarchical.py `
+    --initializer results\ml_hierarchical_geometry\best_model.pt `
+    --output-dir results\ml_hierarchical_balanced_guarded `
+    --figure visualization\output\ml_hierarchical_balanced_guarded_history.png `
+    --body-counts 512,1024,2048 --theta 0.7 `
+    --interaction-backend cuda --epochs 10 --learning-rate 2e-5 `
+    --minimum-learning-rate 1e-6 `
+    --loss-mode snapshot_relative_huber `
+    --checkpoint-selection mean_family_relative_l2 `
+    --maximum-family-regression 0.15 `
+    --max-snapshots 1 --max-particles 2048 `
+    --training-snapshots-per-case 8 `
+    --validation-snapshots-per-case 4 --device cuda
+```
+
+The guard selected epoch 3. Its validation mean-family relative L2 improved
+24.4%, and no trained family regressed more than 12%. Later epochs achieved a
+better mean but were correctly rejected because one family regressed by at
+least 36%. On the unchanged large-N matrix, the guarded model is a substantially
+better compromise than ordinary pooled fine-tuning:
+
+| Family | N | Original error | Pooled fine-tune | Balanced guarded | Guarded change |
+|---|---:|---:|---:|---:|---:|
+| Uniform cube | 32,768 | 1.91% | 7.27% | **1.82%** | -4% |
+| Uniform cube | 65,536 | 1.86% | 8.01% | 2.28% | +22% |
+| Plummer sphere | 32,768 | 14.81% | 15.73% | **10.18%** | -31% |
+| Plummer sphere | 65,536 | 15.44% | 16.63% | **10.86%** | -30% |
+| Two-cluster collision | 32,768 | 18.96% | 4.61% | **11.93%** | -37% |
+| Two-cluster collision | 65,536 | 20.66% | 4.51% | **12.30%** | -40% |
+| Rotating disk (held out) | 32,768 | **16.43%** | 22.25% | 18.20% | +11% |
+| Rotating disk (held out) | 65,536 | **17.78%** | 25.28% | 20.81% | +17% |
+
+The guarded checkpoint is the best trained-family compromise, but the original
+checkpoint remains the conservative default because it still transfers better
+to the completely held-out disk and the largest uniform case. The result also
+shows why the disk must not participate in checkpoint selection: using it would
+turn the final generalization test into validation data. The next model change
+should reduce this remaining distribution shift through stronger weight
+anchoring, richer aggregate-cell features, or a larger radial network, while
+continuing to select solely on trained-family validation slices.
+
+![Guarded balanced crossover](visualization/output/crossover_matrix_balanced_guarded.png)
+
 ### Hierarchical rollout evaluation
 
 The geometry-aware model was inserted into velocity-Verlet at `theta=0.7` and run for 175 steps. The N=128 validation result averages all six trajectories:
@@ -969,7 +1025,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 2. Implement OpenMP and measure scaling across thread counts.
 3. Compare serial, OpenMP, naïve CUDA, and tiled CUDA to find the CPU/GPU crossover point.
 4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
-5. Add family-balanced hierarchical training and per-family checkpoint selection; the first pooled large-N fine-tune improved collision error but regressed uniform, Plummer, and held-out disk accuracy.
+5. Test stronger initializer-weight anchoring, richer aggregate-cell features, or a larger radial network to improve structured families without the remaining 11%–22% transfer regression on disk and the largest uniform case.
 6. Redesign CUDA traversal for deep, irregular trees to reduce branch divergence in concentrated systems.
 7. Run large-N trajectory rollouts to determine whether the approximately 2% uniform-cube error and larger structured-family errors remain stable over time.
 8. Fuse or streamline CUDA traversal and learned-force evaluation so the variable interaction list does not need to be materialized and reread by separate kernels.
