@@ -1,0 +1,26 @@
+{
+  "body_counts": [
+    1024,
+    2048
+  ],
+  "max_trajectories_per_family": 4,
+  "configurations": {
+    "original_theta_0.7": {
+      "checkpoint": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_hierarchical_geometry\\best_model.pt",
+      "theta": 0.7
+    },
+    "original_theta_1.0": {
+      "checkpoint": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_hierarchical_geometry\\best_model.pt",
+      "theta": 1.0
+    },
+    "guarded_theta_0.7": {
+      "checkpoint": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_hierarchical_balanced_guarded\\best_model.pt",
+      "theta": 0.7
+    },
+    "guarded_theta_1.0": {
+      "checkpoint": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_hierarchical_balanced_guarded\\best_model.pt",
+      "theta": 1.0
+    }
+  },
+  "reference": "saved exact tiled-CUDA trajectory checkpoints"
+}

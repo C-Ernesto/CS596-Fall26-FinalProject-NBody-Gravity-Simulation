@@ -933,6 +933,56 @@ continuing to select solely on trained-family validation slices.
 
 ![Guarded balanced crossover](visualization/output/crossover_matrix_balanced_guarded.png)
 
+### Large-N opening-angle tradeoff
+
+The opening angle controls the algorithmic tradeoff independently of the
+learned weights. Smaller `theta` opens more tree cells and evaluates more exact
+near-field interactions; larger `theta` accepts more aggregate cells. The
+reusable sweep compares named checkpoints on identical states and pairs each
+measurement with the existing exact-CUDA timing:
+
+```powershell
+# Safe one-seed pilot across the useful range.
+.\.venv\Scripts\python.exe .\ml\benchmark_theta_sweep.py `
+    --device cuda --body-counts 32768 `
+    --theta 0.5,0.7,1.0 --seeds-per-case 1 `
+    --warmups 0 --repetitions 1
+
+# Full three-seed validation of the promising fast setting.
+.\.venv\Scripts\python.exe .\ml\benchmark_theta_sweep.py `
+    --device cuda --body-counts 32768,65536 `
+    --theta 1.0 --seeds-per-case 3 --warmups 1 --repetitions 5 `
+    --output-dir results\theta_sweep_full_theta1 `
+    --figure visualization\output\theta_sweep_full_theta1.png
+```
+
+The pilot eliminated `theta=0.5`: it retained 4%–15% of direct interactions
+and was 3x–48x slower than exact CUDA, yet structured-family error remained
+9%–16%. The full `theta=1.0` result is:
+
+| Model | Family | N | ML / exact time | Interactions retained | Relative L2 error |
+|---|---|---:|---:|---:|---:|
+| Original | Uniform cube | 32,768 | **0.50x** | 0.85% | **1.74%** |
+| Original | Uniform cube | 65,536 | **0.30x** | 0.47% | **1.69%** |
+| Guarded | Uniform cube | 32,768 | **0.48x** | 0.85% | 2.11% |
+| Guarded | Uniform cube | 65,536 | **0.28x** | 0.47% | 2.27% |
+| Guarded | Plummer sphere | 32,768 | 1.32x | 2.21% | 11.11% |
+| Guarded | Plummer sphere | 65,536 | **0.70x** | 1.13% | 11.38% |
+| Guarded | Two-cluster collision | 32,768 | 1.41x | 2.58% | 12.31% |
+| Guarded | Two-cluster collision | 65,536 | **0.66x** | 1.07% | 12.43% |
+| Guarded | Rotating disk | 32,768 | **0.58x** | 1.00% | 23.65% |
+| Guarded | Rotating disk | 65,536 | **0.34x** | 0.57% | 25.65% |
+
+At N=65536, `theta=1.0` produces a speed crossover for every family: roughly
+1.4x faster for Plummer, 1.5x for collision, 3.0x for disk, and 3.5x for the
+uniform cube. However, only the uniform cube combines the speedup with low
+force error. The scientifically defensible result is therefore: a broad
+**performance crossover** exists at large N, but a broad **accuracy-and-speed
+crossover** does not yet exist. `theta=0.7` remains the conservative project
+default; `theta=1.0` is the measured high-throughput configuration.
+
+![Opening-angle pilot sweep](visualization/output/theta_sweep.png)
+
 ### Hierarchical rollout evaluation
 
 The geometry-aware model was inserted into velocity-Verlet at `theta=0.7` and run for 175 steps. The N=128 validation result averages all six trajectories:
@@ -963,6 +1013,56 @@ The same acceleration offset is removed from every body, so relative acceleratio
 ```
 
 ![Hierarchical rollout errors](visualization/output/rollout_hierarchical/rollout_errors.png)
+
+#### N=1024 and N=2048 rollout matrix
+
+The larger rollout matrix compares the original and guarded checkpoints at
+`theta=0.7` and `theta=1.0`. Every configuration is integrated for 175
+velocity-Verlet steps and compared against the same saved exact tiled-CUDA
+trajectory checkpoints. The final results average both available validation
+trajectories for every trained family/count and all four held-out disk
+trajectories per count:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\run_rollout_matrix.py `
+    --device cuda --body-counts 1024,2048 `
+    --max-trajectories-per-family 4 --overwrite
+```
+
+The guarded checkpoint at the conservative angle gives the following N=2048
+averages; the high-throughput column uses the same guarded weights at
+`theta=1.0`:
+
+| Family | Guarded 0.7 position RMSE | Guarded 0.7 energy drift | Guarded 0.7 time | Guarded 1.0 position RMSE | Guarded 1.0 time |
+|---|---:|---:|---:|---:|---:|
+| Uniform cube | **2.89e-5** | 4.80e-5 | 1,565 ms | 6.13e-5 | **880 ms** |
+| Plummer sphere | **1.01e-4** | 8.84e-5 | 3,635 ms | 1.86e-4 | **2,903 ms** |
+| Two-cluster collision | **2.64e-5** | 7.34e-4 | 3,110 ms | 3.90e-5 | **2,533 ms** |
+| Rotating disk (held out) | **9.98e-4** | 6.69e-4 | 1,882 ms | 1.66e-3 | **1,211 ms** |
+
+At N=2048, changing the guarded model from `theta=0.7` to `theta=1.0`
+reduced the measured 175-step ML simulation time by about 18% for collision,
+20% for Plummer, 36% for disk, and 44% for uniform. Final position error rose
+by approximately 48%, 84%, 67%, and 112%, respectively. All configurations
+remained finite over the short horizon; the worst mean relative energy drift
+was about 0.20%, and momentum drift remained around `1e-8` or lower.
+
+The guarded `theta=0.7` model roughly halved Plummer position error relative to
+the original `theta=0.7` model at both sizes. It also reduced held-out disk
+position error by about 33% at N=1024 and 18% at N=2048. It did not dominate
+every metric: the original model retained lower collision energy drift, and
+some uniform/collision differences changed with N. The correct conclusion is
+therefore that guarded `theta=0.7` is the strongest accuracy-oriented candidate,
+while guarded `theta=1.0` is a faster but less accurate operating point—not a
+universally better model.
+
+The reference checkpoints provide exact-CUDA positions, velocities, and forces
+for error measurement. The times above measure only the ML rollout integration
+on this machine; they are not a fresh exact-CUDA simulation-time comparison.
+Detailed time-series, per-trajectory final values, and force timings are stored
+under `results/rollout_matrix/`.
+
+![Large rollout configuration matrix](visualization/output/rollout_matrix.png)
 
 ### Dataset validation status
 
@@ -1006,12 +1106,14 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 │   ├── evaluate_baseline.py    per-family/count evaluation
 │   ├── rollout.py              integration and physical diagnostics
 │   ├── rollout_baseline.py     exact/learned trajectory evaluation
+│   ├── run_rollout_matrix.py   multi-model/angle rollout comparison
 │   ├── hierarchical_model.py   octree exact-near/learned-far prototype
 │   ├── train_hierarchical.py   aggregate-cell far-field fine-tuning
 │   ├── evaluate_hierarchical.py accuracy-versus-work sweep
 │   ├── benchmark_hierarchical.py end-to-end sparse-force timing
 │   ├── benchmark_large_n.py    paired large-N crossover experiment
 │   ├── benchmark_crossover_matrix.py multi-family/seed validation
+│   ├── benchmark_theta_sweep.py opening-angle accuracy/speed sweep
 │   ├── cpp/                    compiled parallel interaction builder
 │   └── dataset.py              Parquet snapshot loader
 ├── results/                    selected versioned results; other output ignored
@@ -1027,8 +1129,8 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
 5. Test stronger initializer-weight anchoring, richer aggregate-cell features, or a larger radial network to improve structured families without the remaining 11%–22% transfer regression on disk and the largest uniform case.
 6. Redesign CUDA traversal for deep, irregular trees to reduce branch divergence in concentrated systems.
-7. Run large-N trajectory rollouts to determine whether the approximately 2% uniform-cube error and larger structured-family errors remain stable over time.
+7. Extend the completed 175-step N=1024/2048 rollout matrix to longer horizons and, if memory permits, larger N to test delayed instability.
 8. Fuse or streamline CUDA traversal and learned-force evaluation so the variable interaction list does not need to be materialized and reread by separate kernels.
-9. Investigate richer cell features if diverse training alone does not produce the required accuracy.
+9. Define an explicit acceptable force/trajectory error threshold before choosing a final checkpoint and opening angle.
 
 Any ML speedup claim must include graph construction, preprocessing, transfers, and inference. Kernel-only ML timing must not be compared with end-to-end exact-solver timing.

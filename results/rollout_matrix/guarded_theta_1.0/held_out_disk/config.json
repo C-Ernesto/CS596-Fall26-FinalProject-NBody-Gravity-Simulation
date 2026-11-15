@@ -1,0 +1,16 @@
+{
+  "predictor": "hierarchical",
+  "checkpoint": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_hierarchical_balanced_guarded\\best_model.pt",
+  "checkpoint_epoch": 3,
+  "split": "test",
+  "evaluation_group": "held_out_family",
+  "body_counts": [
+    1024,
+    2048
+  ],
+  "trajectories": 8,
+  "device": "cuda",
+  "dtype": "torch.float32",
+  "theta": 1.0,
+  "leaf_capacity": 16
+}

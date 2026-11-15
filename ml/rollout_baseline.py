@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -127,13 +128,15 @@ def model_acceleration(
 
 def select_trajectories(index: pd.DataFrame, maximum_per_family: int) -> list[str]:
     trajectories = index[
-        ["trajectory_uid", "initial_condition", "seed"]
+        ["trajectory_uid", "initial_condition", "particle_count", "seed"]
     ].drop_duplicates("trajectory_uid")
-    trajectories = trajectories.sort_values(["initial_condition", "seed"])
+    trajectories = trajectories.sort_values(
+        ["initial_condition", "particle_count", "seed"]
+    )
     if maximum_per_family > 0:
-        trajectories = trajectories.groupby("initial_condition", as_index=False).head(
-            maximum_per_family
-        )
+        trajectories = trajectories.groupby(
+            ["initial_condition", "particle_count"], as_index=False
+        ).head(maximum_per_family)
     return trajectories["trajectory_uid"].tolist()
 
 
@@ -239,6 +242,7 @@ def main() -> int:
             dataset.index, arguments.max_trajectories_per_family
         )
         metric_rows: list[dict] = []
+        runtime_rows: list[dict] = []
         final_states: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 
         for trajectory_number, trajectory_uid in enumerate(trajectories, start=1):
@@ -266,8 +270,41 @@ def main() -> int:
                     model, model_name, state_positions, masses, epsilon
                 )
 
+            rollout_force_seconds = 0.0
+            diagnostic_force_seconds = 0.0
+            rollout_force_calls = 0
+            diagnostic_force_calls = 0
+            simulation_seconds = 0.0
+
+            def rollout_acceleration(state_positions: torch.Tensor) -> torch.Tensor:
+                nonlocal rollout_force_seconds, rollout_force_calls
+                if device.type == "cuda":
+                    torch.cuda.synchronize(device)
+                started = time.perf_counter()
+                result = acceleration_function(state_positions)
+                if device.type == "cuda":
+                    torch.cuda.synchronize(device)
+                rollout_force_seconds += time.perf_counter() - started
+                rollout_force_calls += 1
+                return result
+
+            def diagnostic_acceleration(state_positions: torch.Tensor) -> torch.Tensor:
+                nonlocal diagnostic_force_seconds, diagnostic_force_calls
+                if device.type == "cuda":
+                    torch.cuda.synchronize(device)
+                started = time.perf_counter()
+                result = acceleration_function(state_positions)
+                if device.type == "cuda":
+                    torch.cuda.synchronize(device)
+                diagnostic_force_seconds += time.perf_counter() - started
+                diagnostic_force_calls += 1
+                return result
+
             with torch.inference_mode():
-                accelerations = acceleration_function(positions)
+                trajectory_started = time.perf_counter()
+                simulation_started = time.perf_counter()
+                accelerations = rollout_acceleration(positions)
+                simulation_seconds += time.perf_counter() - simulation_started
                 initial_energy = softened_total_energy(
                     positions, velocities, masses, epsilon
                 )
@@ -284,7 +321,7 @@ def main() -> int:
                         exact_positions = exact_snapshot["positions"].to(device)
                         exact_velocities = exact_snapshot["velocities"].to(device)
                         exact_accelerations = exact_snapshot["accelerations"].to(device)
-                        force_on_exact = acceleration_function(exact_positions)
+                        force_on_exact = diagnostic_acceleration(exact_positions)
                         energy = softened_total_energy(
                             positions, velocities, masses, epsilon
                         )
@@ -324,6 +361,9 @@ def main() -> int:
                                         momentum - initial_momentum
                                     ).item()
                                 ),
+                                "cumulative_rollout_force_ms": (
+                                    1000.0 * rollout_force_seconds
+                                ),
                             }
                         )
                         if time_step == maximum_step and family not in final_states:
@@ -332,13 +372,15 @@ def main() -> int:
                                 exact_positions.detach().cpu().numpy(),
                             )
                     if time_step < maximum_step:
+                        simulation_started = time.perf_counter()
                         positions, velocities, accelerations = velocity_verlet_step(
                             positions,
                             velocities,
                             accelerations,
                             dt,
-                            acceleration_function,
+                            rollout_acceleration,
                         )
+                        simulation_seconds += time.perf_counter() - simulation_started
                         if not (
                             torch.isfinite(positions).all()
                             and torch.isfinite(velocities).all()
@@ -347,6 +389,31 @@ def main() -> int:
                             raise ValueError(
                                 f"non-finite rollout state for {trajectory_uid} at step {time_step + 1}"
                             )
+                if device.type == "cuda":
+                    torch.cuda.synchronize(device)
+                rollout_wall_seconds = time.perf_counter() - trajectory_started
+            runtime_rows.append(
+                {
+                    "predictor": arguments.predictor,
+                    "trajectory_uid": trajectory_uid,
+                    "initial_condition": family,
+                    "particle_count": len(positions),
+                    "seed": int(metadata["seed"]),
+                    "integration_steps": maximum_step,
+                    "rollout_force_calls": rollout_force_calls,
+                    "rollout_force_ms": 1000.0 * rollout_force_seconds,
+                    "mean_rollout_force_ms": (
+                        1000.0 * rollout_force_seconds / rollout_force_calls
+                    ),
+                    "simulation_ms": 1000.0 * simulation_seconds,
+                    "mean_simulation_step_ms": (
+                        1000.0 * simulation_seconds / maximum_step
+                    ),
+                    "diagnostic_force_calls": diagnostic_force_calls,
+                    "diagnostic_force_ms": 1000.0 * diagnostic_force_seconds,
+                    "rollout_wall_ms": 1000.0 * rollout_wall_seconds,
+                }
+            )
             print(
                 f"[{trajectory_number}/{len(trajectories)}] {trajectory_uid}: "
                 f"family={family}, final position RMSE={metric_rows[-1]['position_rmse']:.6g}"
@@ -354,6 +421,8 @@ def main() -> int:
 
         metrics = pd.DataFrame(metric_rows)
         metrics.to_csv(output_dir / "trajectory_metrics.csv", index=False)
+        runtimes = pd.DataFrame(runtime_rows)
+        runtimes.to_csv(output_dir / "trajectory_runtime.csv", index=False)
         summary = (
             metrics.groupby(["initial_condition", "time_step"], as_index=False)
             .agg(

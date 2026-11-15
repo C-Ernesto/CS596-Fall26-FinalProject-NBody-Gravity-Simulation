@@ -175,6 +175,36 @@ error improved about 30% and collision error improved 37%–40%; uniform was
 11%–17%, so the guarded model is a useful structured-family candidate rather
 than the new default. The disk remains excluded from model selection.
 
+Map the large-N accuracy/speed tradeoff across tree opening angles with:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\benchmark_theta_sweep.py --device cuda --body-counts 32768 --theta 0.5,0.7,1.0 --seeds-per-case 1 --warmups 0 --repetitions 1
+.\.venv\Scripts\python.exe .\ml\benchmark_theta_sweep.py --device cuda --body-counts 32768,65536 --theta 1.0 --seeds-per-case 3 --warmups 1 --repetitions 5 --output-dir results\theta_sweep_full_theta1 --figure visualization\output\theta_sweep_full_theta1.png
+```
+
+The pilot rejects `theta=0.5` as too slow. At `theta=1.0` and N=65536, sparse
+ML is faster than exact CUDA for all four families, but only uniform cube also
+has low force error (1.69% for the original checkpoint). Guarded Plummer and
+collision are about 11%–12%, and the held-out disk is about 26%. This establishes
+a broad performance crossover, but not a broad accuracy-and-speed crossover.
+Keep `theta=0.7` as the conservative default and treat `theta=1.0` as the
+measured high-throughput setting.
+
+Compare both checkpoints and both operating angles inside velocity-Verlet with:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\run_rollout_matrix.py --device cuda --body-counts 1024,2048 --max-trajectories-per-family 4 --overwrite
+```
+
+This runs 175 steps for two validation trajectories per trained family/count
+and four held-out disk trajectories per count. At N=2048, guarded `theta=1.0`
+was 18%–44% faster than guarded `theta=0.7`, depending on family, but increased
+final position RMSE by 48%–112%. Guarded `theta=0.7` roughly halved Plummer
+position error relative to the original checkpoint and improved held-out disk
+position error by 18%–33%. All runs remained finite and the worst mean energy
+drift was about 0.20%. Saved tiled-CUDA checkpoints are the accuracy reference;
+reported simulation milliseconds measure the ML rollout only.
+
 Fine-tune the aggregate-cell radial network while leaving exact-near forces
 fixed:
 

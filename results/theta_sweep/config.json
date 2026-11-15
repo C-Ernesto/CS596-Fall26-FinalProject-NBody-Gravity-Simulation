@@ -1,0 +1,20 @@
+{
+  "models": {
+    "original": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_hierarchical_geometry\\best_model.pt",
+    "guarded": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_hierarchical_balanced_guarded\\best_model.pt"
+  },
+  "theta": [
+    0.5,
+    0.7,
+    1.0
+  ],
+  "body_counts": [
+    32768
+  ],
+  "seeds_per_case": 1,
+  "warmups": 0,
+  "repetitions": 1,
+  "exact_results": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\crossover_matrix\\exact_per_run.csv",
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 3060 Laptop GPU"
+}

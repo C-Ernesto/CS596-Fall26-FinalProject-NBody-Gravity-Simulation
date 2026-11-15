@@ -98,6 +98,15 @@ CMakeUserPresets.json
 !/results/crossover_matrix_balanced_guarded/
 !/results/crossover_matrix_balanced_guarded/*.csv
 !/results/crossover_matrix_balanced_guarded/*.json
+!/results/theta_sweep/
+!/results/theta_sweep/*.csv
+!/results/theta_sweep/*.json
+!/results/theta_sweep_full_theta1/
+!/results/theta_sweep_full_theta1/*.csv
+!/results/theta_sweep_full_theta1/*.json
+!/results/rollout_matrix/
+!/results/rollout_matrix/*.csv
+!/results/rollout_matrix/*.json
 !/results/rollout_hierarchical/
 !/results/rollout_hierarchical/*.csv
 !/results/rollout_hierarchical/*.json
@@ -135,6 +144,9 @@ CMakeUserPresets.json
 !/visualization/output/crossover_matrix_balanced.png
 !/visualization/output/ml_hierarchical_balanced_guarded_history.png
 !/visualization/output/crossover_matrix_balanced_guarded.png
+!/visualization/output/theta_sweep.png
+!/visualization/output/theta_sweep_full_theta1.png
+!/visualization/output/rollout_matrix.png
 !/visualization/output/rollout_hierarchical/
 !/visualization/output/rollout_hierarchical/*.png
 !/visualization/output/rollout_hierarchical_disk/

@@ -1,0 +1,16 @@
+{
+  "predictor": "hierarchical",
+  "checkpoint": "C:\\Users\\chris\\Documents\\School\\USC\\CSCI 596 - Scientific Computing and Visualization\\Project\\results\\ml_hierarchical_geometry\\best_model.pt",
+  "checkpoint_epoch": 10,
+  "split": "validation",
+  "evaluation_group": null,
+  "body_counts": [
+    1024,
+    2048
+  ],
+  "trajectories": 12,
+  "device": "cuda",
+  "dtype": "torch.float32",
+  "theta": 0.7,
+  "leaf_capacity": 16
+}
