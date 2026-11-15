@@ -774,6 +774,52 @@ Detailed runs, stage medians, configuration, and the joined comparison are in
 
 ![Paired large-N crossover](visualization/output/large_n_crossover.png)
 
+### Multi-family and multi-seed crossover validation
+
+The single-seed uniform-cube crossover is real but not general. The validation
+matrix repeats the paired experiment with three independent seeds for each of
+four initial-condition families at N=32768 and N=65536, for 24 paired cases and
+five timing repetitions per method and case:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\benchmark_crossover_matrix.py `
+    --device cuda --regenerate
+```
+
+Median results across the three seeds are:
+
+| Family | N | ML / exact time | ML wins | Interactions retained | Relative L2 force error |
+|---|---:|---:|---:|---:|---:|
+| Uniform cube | 32,768 | 1.20x | 0/3 | 2.22% | 1.91% |
+| Uniform cube | 65,536 | **0.70x** | **3/3** | 1.25% | 1.86% |
+| Rotating disk | 32,768 | 1.20x | 0/3 | 2.18% | 16.43% |
+| Rotating disk | 65,536 | **0.81x** | **3/3** | 1.26% | 17.78% |
+| Plummer sphere | 32,768 | 3.31x | 0/3 | 6.41% | 14.81% |
+| Plummer sphere | 65,536 | 13.37x | 0/3 | 3.36% | 15.44% |
+| Two-cluster collision | 32,768 | 3.76x | 0/3 | 6.17% | 18.96% |
+| Two-cluster collision | 65,536 | 12.21x | 0/3 | 3.16% | 20.66% |
+
+At N=65536, ML is faster for all six uniform-cube and rotating-disk cases but
+slower for all six concentrated Plummer and collision cases. Only the uniform
+cube combines a speedup with low force error. The disk crossover is not yet
+scientifically useful because its roughly 18% error is too large, while the
+Plummer and collision cases have both poor accuracy and severe traversal
+slowdowns. Deep, irregular trees cause high GPU branch divergence and retain
+more near-field interactions than diffuse systems.
+
+Across all families, no N=32768 case is faster. At N=65536, 50% of cases are
+faster, but the median family/seed case remains 6.50x slower because the two
+concentrated families are expensive. The defensible conclusion is therefore a
+**distribution-dependent crossover**, not a universal one. The current model
+and CUDA traversal are effective for diffuse uniform states but require more
+diverse large-N training and a better irregular-tree traversal before making a
+general speedup claim.
+
+Detailed per-run, per-case, per-family, and overall summaries are stored in
+`results/crossover_matrix/`.
+
+![Multi-family crossover validation](visualization/output/crossover_matrix.png)
+
 ### Hierarchical rollout evaluation
 
 The geometry-aware model was inserted into velocity-Verlet at `theta=0.7` and run for 175 steps. The N=128 validation result averages all six trajectories:
@@ -852,6 +898,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 │   ├── evaluate_hierarchical.py accuracy-versus-work sweep
 │   ├── benchmark_hierarchical.py end-to-end sparse-force timing
 │   ├── benchmark_large_n.py    paired large-N crossover experiment
+│   ├── benchmark_crossover_matrix.py multi-family/seed validation
 │   ├── cpp/                    compiled parallel interaction builder
 │   └── dataset.py              Parquet snapshot loader
 ├── results/                    selected versioned results; other output ignored
@@ -865,9 +912,10 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 2. Implement OpenMP and measure scaling across thread counts.
 3. Compare serial, OpenMP, naïve CUDA, and tiled CUDA to find the CPU/GPU crossover point.
 4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
-5. Repeat the measured large-N crossover across multiple seeds and all initial-condition families.
-6. Run large-N trajectory rollouts to determine whether the approximately 2% one-step force error remains stable over time.
-7. Fuse or streamline CUDA traversal and learned-force evaluation so the variable interaction list does not need to be materialized and reread by separate kernels.
-8. Investigate richer cell features only if the current accuracy is insufficient for the target speedup.
+5. Retrain or fine-tune the hierarchical model on diverse larger-N Plummer, collision, and disk states; their current 15%–21% force error is not acceptable.
+6. Redesign CUDA traversal for deep, irregular trees to reduce branch divergence in concentrated systems.
+7. Run large-N trajectory rollouts to determine whether the approximately 2% uniform-cube error and larger structured-family errors remain stable over time.
+8. Fuse or streamline CUDA traversal and learned-force evaluation so the variable interaction list does not need to be materialized and reread by separate kernels.
+9. Investigate richer cell features if diverse training alone does not produce the required accuracy.
 
 Any ML speedup claim must include graph construction, preprocessing, transfers, and inference. Kernel-only ML timing must not be compared with end-to-end exact-solver timing.

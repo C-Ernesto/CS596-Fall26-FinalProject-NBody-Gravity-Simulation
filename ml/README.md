@@ -123,6 +123,22 @@ per size and compare FP32 ML with exact FP64 CUDA. The next validation should
 repeat the crossover across seeds and initial-condition families and test
 trajectory stability.
 
+The multi-family validation is now reproducible with:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\benchmark_crossover_matrix.py --device cuda --regenerate
+```
+
+This tests N=32768 and N=65536 using three seeds each for the uniform cube,
+Plummer sphere, two-cluster collision, and rotating disk. At N=65536, ML was
+faster for all uniform-cube and disk seeds but slower for every Plummer and
+collision seed. Only the uniform cube combined speed with low error (1.86%);
+the other families had 15%–21% relative force error. Concentrated systems also
+caused severe irregular-tree traversal slowdown. The result is therefore a
+distribution-dependent crossover. The next model work should train on diverse
+large-N structured states, while the next CUDA work should target divergence in
+deep irregular trees.
+
 Fine-tune the aggregate-cell radial network while leaving exact-near forces
 fixed:
 

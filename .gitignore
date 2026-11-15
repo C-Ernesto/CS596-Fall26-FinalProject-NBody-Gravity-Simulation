@@ -74,6 +74,9 @@ CMakeUserPresets.json
 !/results/large_n_crossover/
 !/results/large_n_crossover/*.csv
 !/results/large_n_crossover/*.json
+!/results/crossover_matrix/
+!/results/crossover_matrix/*.csv
+!/results/crossover_matrix/*.json
 !/results/rollout_hierarchical/
 !/results/rollout_hierarchical/*.csv
 !/results/rollout_hierarchical/*.json
@@ -104,6 +107,7 @@ CMakeUserPresets.json
 !/visualization/output/hierarchical_benchmark_cpp.png
 !/visualization/output/hierarchical_benchmark_cuda.png
 !/visualization/output/large_n_crossover.png
+!/visualization/output/crossover_matrix.png
 !/visualization/output/rollout_hierarchical/
 !/visualization/output/rollout_hierarchical/*.png
 !/visualization/output/rollout_hierarchical_disk/
