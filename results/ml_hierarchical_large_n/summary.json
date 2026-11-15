@@ -1,0 +1,14 @@
+{
+  "initializer_validation_metrics": {
+    "mse": 0.0005880145995361668,
+    "mae": 0.01475332627841641,
+    "mean_relative_vector_error": 0.05588259302922303,
+    "mean_cosine_similarity": 0.9998987246127355,
+    "loss": 0.00029400731095631185
+  },
+  "best_validation_loss": 0.00021694932451867186,
+  "best_epoch": 5,
+  "improved_over_initializer": true,
+  "relative_loss_improvement": 0.2620954771056372,
+  "elapsed_seconds": 17.32303909999996
+}

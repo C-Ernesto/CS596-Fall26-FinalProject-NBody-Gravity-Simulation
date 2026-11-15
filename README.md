@@ -820,6 +820,63 @@ Detailed per-run, per-case, per-family, and overall summaries are stored in
 
 ![Multi-family crossover validation](visualization/output/crossover_matrix.png)
 
+### Controlled large-N fine-tuning experiment
+
+The next model experiment resumed the hierarchical checkpoint at the benchmark
+setting `theta=0.7` and fine-tuned it on reproducibly sampled N=512, 1024, and
+2048 states. Training used eight snapshots per family/count and validation used
+four, for 72 training and 36 validation snapshots. The three training families
+were uniform cube, Plummer sphere, and two-cluster collision; the rotating disk
+remained completely held out. Run it with:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\train_hierarchical.py `
+    --initializer results\ml_hierarchical_geometry\best_model.pt `
+    --output-dir results\ml_hierarchical_large_n `
+    --figure visualization\output\ml_hierarchical_large_n_history.png `
+    --body-counts 512,1024,2048 --theta 0.7 `
+    --interaction-backend cuda --epochs 5 --learning-rate 5e-5 `
+    --minimum-learning-rate 1e-6 --max-snapshots 1 `
+    --max-particles 2048 --training-snapshots-per-case 8 `
+    --validation-snapshots-per-case 4 --device cuda
+```
+
+Validation loss improved 26.2%, from `2.940e-4` to `2.169e-4`, but that pooled
+metric hid a large family tradeoff when the unchanged 24-case crossover matrix
+was rerun. Collision error improved sharply, while every other family regressed:
+
+| Family | N | Original error | Fine-tuned error | Fine-tuned ML / exact time |
+|---|---:|---:|---:|---:|
+| Uniform cube | 32,768 | 1.91% | 7.27% | 1.17x |
+| Uniform cube | 65,536 | 1.86% | 8.01% | **0.69x** |
+| Plummer sphere | 32,768 | 14.81% | 15.73% | 3.39x |
+| Plummer sphere | 65,536 | 15.44% | 16.63% | 14.15x |
+| Two-cluster collision | 32,768 | 18.96% | **4.61%** | 4.09x |
+| Two-cluster collision | 65,536 | 20.66% | **4.51%** | 13.35x |
+| Rotating disk (held out) | 32,768 | 16.43% | 22.25% | 1.27x |
+| Rotating disk (held out) | 65,536 | 17.78% | 25.28% | **0.86x** |
+
+The fine-tuned checkpoint is therefore retained as an experiment but is **not**
+the new default. It demonstrates that ordinary pooled loss can specialize the
+small radial network toward one high-error family even while aggregate
+validation loss improves. The next training change should use family-balanced
+loss or family-aware model selection and reject checkpoints that regress badly
+on any trained-family validation slice. The disk must remain held out for the
+final generalization test.
+
+Reproduce the paired evaluation while reusing the existing exact timings with:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\benchmark_crossover_matrix.py `
+    --device cuda `
+    --checkpoint results\ml_hierarchical_large_n\best_model.pt `
+    --output-dir results\crossover_matrix_large_trained `
+    --figure visualization\output\crossover_matrix_large_trained.png `
+    --exact-results-dir results\crossover_matrix
+```
+
+![Large-N fine-tuning crossover](visualization/output/crossover_matrix_large_trained.png)
+
 ### Hierarchical rollout evaluation
 
 The geometry-aware model was inserted into velocity-Verlet at `theta=0.7` and run for 175 steps. The N=128 validation result averages all six trajectories:
@@ -912,7 +969,7 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 2. Implement OpenMP and measure scaling across thread counts.
 3. Compare serial, OpenMP, naïve CUDA, and tiled CUDA to find the CPU/GPU crossover point.
 4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
-5. Retrain or fine-tune the hierarchical model on diverse larger-N Plummer, collision, and disk states; their current 15%–21% force error is not acceptable.
+5. Add family-balanced hierarchical training and per-family checkpoint selection; the first pooled large-N fine-tune improved collision error but regressed uniform, Plummer, and held-out disk accuracy.
 6. Redesign CUDA traversal for deep, irregular trees to reduce branch divergence in concentrated systems.
 7. Run large-N trajectory rollouts to determine whether the approximately 2% uniform-cube error and larger structured-family errors remain stable over time.
 8. Fuse or streamline CUDA traversal and learned-force evaluation so the variable interaction list does not need to be materialized and reread by separate kernels.

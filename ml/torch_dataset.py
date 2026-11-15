@@ -7,6 +7,7 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import Iterator, Sequence
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, Sampler
 
@@ -25,9 +26,13 @@ class NBodyTorchDataset(Dataset):
         normalize: bool = True,
         include_velocity_features: bool = False,
         dtype: torch.dtype = torch.float32,
+        snapshots_per_case: int = 0,
+        selection_seed: int = 12345,
     ) -> None:
         if not dtype.is_floating_point:
             raise ValueError("dtype must be a floating-point torch dtype")
+        if snapshots_per_case < 0:
+            raise ValueError("snapshots_per_case cannot be negative")
         self.snapshots = SnapshotDataset(
             root=root,
             split=split,
@@ -35,6 +40,19 @@ class NBodyTorchDataset(Dataset):
             particle_counts=particle_counts,
             normalize=normalize,
         )
+        if snapshots_per_case:
+            frame = self.snapshots.index.reset_index(drop=True)
+            generator = np.random.default_rng(selection_seed)
+            selected: list[int] = []
+            for _, group in frame.groupby(
+                ["initial_condition", "particle_count"], sort=True
+            ):
+                group_indices = group.index.to_numpy()
+                count = min(snapshots_per_case, len(group_indices))
+                selected.extend(
+                    generator.choice(group_indices, size=count, replace=False).tolist()
+                )
+            self.snapshots.index = frame.iloc[sorted(selected)].reset_index(drop=True)
         if len(self.snapshots) == 0:
             raise ValueError("dataset filters selected no snapshots")
         self.normalize = normalize
@@ -198,6 +216,8 @@ def make_dataloader(
     normalize: bool = True,
     include_velocity_features: bool = False,
     dtype: torch.dtype = torch.float32,
+    snapshots_per_case: int = 0,
+    selection_seed: int = 12345,
     max_snapshots: int = 4,
     max_particles: int = 4096,
     shuffle: bool | None = None,
@@ -214,6 +234,8 @@ def make_dataloader(
         normalize=normalize,
         include_velocity_features=include_velocity_features,
         dtype=dtype,
+        snapshots_per_case=snapshots_per_case,
+        selection_seed=selection_seed,
     )
     if shuffle is None:
         shuffle = split == "train"

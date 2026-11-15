@@ -61,6 +61,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--huber-beta", type=float, default=1.0)
     parser.add_argument("--max-snapshots", type=int, default=4)
     parser.add_argument("--max-particles", type=int, default=512)
+    parser.add_argument("--training-snapshots-per-case", type=int, default=0)
+    parser.add_argument("--validation-snapshots-per-case", type=int, default=0)
     parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     return parser.parse_args()
@@ -115,7 +117,9 @@ def main() -> int:
             raise ValueError("learning rates must satisfy 0 < minimum <= initial")
         set_random_seed(arguments.seed)
         device = choose_device(arguments.device)
-        pairwise, initializer = load_radial_model(arguments.initializer, device)
+        initializer = torch.load(
+            arguments.initializer, map_location=device, weights_only=False
+        )
         base_configuration = initializer["configuration"]
         model = HierarchicalForceModel(
             hidden_dim=int(base_configuration["hidden_dim"]),
@@ -124,7 +128,14 @@ def main() -> int:
             leaf_capacity=arguments.leaf_capacity,
             interaction_backend=arguments.interaction_backend,
         ).to(device)
-        model.load_pairwise_radial_network(pairwise)
+        initializer_kind = base_configuration.get("model", "pairwise")
+        if initializer_kind == "pairwise":
+            pairwise, _ = load_radial_model(arguments.initializer, device)
+            model.load_pairwise_radial_network(pairwise)
+        elif initializer_kind == "hierarchical":
+            model.load_state_dict(initializer["model_state_dict"])
+        else:
+            raise ValueError(f"unsupported initializer model: {initializer_kind}")
 
         loader_arguments = {
             "root": arguments.dataset,
@@ -133,9 +144,19 @@ def main() -> int:
             "max_particles": arguments.max_particles,
             "seed": arguments.seed,
         }
-        train_loader = make_dataloader(split="train", shuffle=True, **loader_arguments)
+        train_loader = make_dataloader(
+            split="train",
+            shuffle=True,
+            snapshots_per_case=arguments.training_snapshots_per_case,
+            selection_seed=arguments.seed,
+            **loader_arguments,
+        )
         validation_loader = make_dataloader(
-            split="validation", shuffle=False, **loader_arguments
+            split="validation",
+            shuffle=False,
+            snapshots_per_case=arguments.validation_snapshots_per_case,
+            selection_seed=arguments.seed,
+            **loader_arguments,
         )
         loss_function = nn.SmoothL1Loss(beta=arguments.huber_beta)
         optimizer = torch.optim.AdamW(
@@ -182,6 +203,17 @@ def main() -> int:
         history_rows: list[dict[str, float | int]] = []
         best_validation = initial_metrics["loss"]
         best_epoch = 0
+        checkpoint_path = arguments.output_dir / "best_model.pt"
+        torch.save(
+            {
+                "model_state_dict": model.state_dict(),
+                "configuration": configuration,
+                "epoch": 0,
+                "validation_metrics": initial_metrics,
+                "initializer_validation_metrics": initial_metrics,
+            },
+            checkpoint_path,
+        )
         started = time.perf_counter()
         for epoch in range(1, arguments.epochs + 1):
             train_loader.batch_sampler.set_epoch(epoch)
@@ -212,7 +244,7 @@ def main() -> int:
                         "validation_metrics": validation_metrics,
                         "initializer_validation_metrics": initial_metrics,
                     },
-                    arguments.output_dir / "best_model.pt",
+                    checkpoint_path,
                 )
             scheduler.step()
 
@@ -235,9 +267,8 @@ def main() -> int:
             json.dumps(summary, indent=2), encoding="utf-8"
         )
         if not improved:
-            print("No epoch improved validation loss; no fine-tuned checkpoint was kept.")
-        else:
-            print(f"Best checkpoint: {arguments.output_dir / 'best_model.pt'}")
+            print("No epoch improved validation loss; using the epoch-0 checkpoint.")
+        print(f"Best checkpoint: {checkpoint_path}")
         print(f"Training completed in {elapsed:.2f} seconds")
         return 0
     except (OSError, ValueError, RuntimeError, KeyError) as error:

@@ -139,6 +139,27 @@ distribution-dependent crossover. The next model work should train on diverse
 large-N structured states, while the next CUDA work should target divergence in
 deep irregular trees.
 
+A controlled larger-N fine-tune can be resumed from the existing hierarchical
+checkpoint without training on every available snapshot:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\train_hierarchical.py --initializer results\ml_hierarchical_geometry\best_model.pt --output-dir results\ml_hierarchical_large_n --figure visualization\output\ml_hierarchical_large_n_history.png --body-counts 512,1024,2048 --theta 0.7 --interaction-backend cuda --epochs 5 --learning-rate 5e-5 --minimum-learning-rate 1e-6 --max-snapshots 1 --max-particles 2048 --training-snapshots-per-case 8 --validation-snapshots-per-case 4 --device cuda
+```
+
+Sampling is deterministic within each initial-condition/count group. This run
+improved pooled validation loss by 26.2%, but the repeated large-N matrix showed
+that it specialized toward the collision family: collision force error fell to
+about 4.5%, while uniform-cube error rose to 7%–8%, Plummer remained near 16%,
+and the held-out disk rose to 22%–25%. It is an informative experimental
+checkpoint, not the default model. The next training iteration should balance
+families explicitly and select checkpoints using per-family validation metrics.
+
+Re-evaluate it using the existing exact timings:
+
+```powershell
+.\.venv\Scripts\python.exe .\ml\benchmark_crossover_matrix.py --device cuda --checkpoint results\ml_hierarchical_large_n\best_model.pt --output-dir results\crossover_matrix_large_trained --figure visualization\output\crossover_matrix_large_trained.png --exact-results-dir results\crossover_matrix
+```
+
 Fine-tune the aggregate-cell radial network while leaving exact-near forces
 fixed:
 

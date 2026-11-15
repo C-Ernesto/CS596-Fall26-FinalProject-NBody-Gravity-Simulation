@@ -66,6 +66,38 @@ class TorchDatasetTests(unittest.TestCase):
             sample["node_features"][:, 4:], sample["velocities"]
         )
 
+    def test_deterministic_snapshots_per_case(self) -> None:
+        first = NBodyTorchDataset(
+            DATASET_ROOT,
+            split="train",
+            particle_counts=[512, 1024, 2048],
+            snapshots_per_case=3,
+            selection_seed=7,
+        )
+        second = NBodyTorchDataset(
+            DATASET_ROOT,
+            split="train",
+            particle_counts=[512, 1024, 2048],
+            snapshots_per_case=3,
+            selection_seed=7,
+        )
+        different = NBodyTorchDataset(
+            DATASET_ROOT,
+            split="train",
+            particle_counts=[512, 1024, 2048],
+            snapshots_per_case=3,
+            selection_seed=8,
+        )
+        self.assertEqual(len(first), 27)
+        self.assertEqual(
+            first.index["snapshot_id"].tolist(),
+            second.index["snapshot_id"].tolist(),
+        )
+        self.assertNotEqual(
+            first.index["snapshot_id"].tolist(),
+            different.index["snapshot_id"].tolist(),
+        )
+
     def test_variable_size_collation_preserves_boundaries(self) -> None:
         first = self.dataset[0]
         second = self.dataset[80]

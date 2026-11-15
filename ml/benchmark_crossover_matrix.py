@@ -60,6 +60,12 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--exact-results-dir",
+        type=Path,
+        default=None,
+        help="Reuse exact per-run CSV files from this directory.",
+    )
     parser.add_argument("--figure", type=Path, default=DEFAULT_FIGURE)
     parser.add_argument("--theta", type=float, default=0.7)
     parser.add_argument("--leaf-capacity", type=int, default=16)
@@ -81,7 +87,8 @@ def generate_family(
     family_index: int,
 ) -> tuple[Path, Path]:
     raw_path = arguments.raw_dir / f"{family}.csv"
-    exact_path = arguments.output_dir / f"exact_{family}_per_run.csv"
+    exact_directory = arguments.exact_results_dir or arguments.output_dir
+    exact_path = exact_directory / f"exact_{family}_per_run.csv"
     seed = family_seed(arguments, family_index)
     counts = ",".join(map(str, arguments.body_counts))
     if arguments.regenerate or not raw_path.exists():
@@ -347,6 +354,8 @@ def main() -> int:
             raise FileNotFoundError("build the dataset generator and force benchmark first")
         arguments.raw_dir.mkdir(parents=True, exist_ok=True)
         arguments.output_dir.mkdir(parents=True, exist_ok=True)
+        if arguments.exact_results_dir is not None:
+            arguments.exact_results_dir.mkdir(parents=True, exist_ok=True)
 
         raw_paths: list[Path] = []
         exact_frames: list[pd.DataFrame] = []
@@ -440,6 +449,9 @@ def main() -> int:
             "warmups": arguments.warmups,
             "repetitions": arguments.repetitions,
             "checkpoint": str(arguments.checkpoint),
+            "exact_results_dir": str(
+                arguments.exact_results_dir or arguments.output_dir
+            ),
             "checkpoint_epoch": checkpoint.get("epoch"),
             "device": str(device),
             "gpu": torch.cuda.get_device_name(device),
