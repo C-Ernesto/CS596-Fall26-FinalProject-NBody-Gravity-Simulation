@@ -35,6 +35,7 @@ CMakeUserPresets.json
 !/results/cuda_block_sweep_refined_best.csv
 !/results/cpu_force_sweep.csv
 !/results/cpu_cuda_crossover.csv
+!/results/cpu_cuda_crossover_summary.csv
 !/results/cpu_label_validation.csv
 !/results/dataset_analysis/
 !/results/dataset_analysis/*.csv
@@ -123,6 +124,7 @@ CMakeUserPresets.json
 !/visualization/output/cuda_optimized_tiled_speedup.png
 !/visualization/output/cuda_optimized_timing_breakdown.png
 !/visualization/output/cuda_block_sweep_refined.png
+!/visualization/output/cpu_cuda_crossover.png
 !/visualization/output/dataset_analysis/
 !/visualization/output/dataset_analysis/*.png
 !/visualization/output/ml_baseline_history.png

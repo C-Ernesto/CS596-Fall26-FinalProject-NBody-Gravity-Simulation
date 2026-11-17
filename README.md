@@ -350,6 +350,14 @@ median `total_ms` across all families, seeds, and repetitions:
 | 8,192 | 325.323 | 67.993 | 23.683 | Tiled CUDA |
 | 16,384 | 1,321.438 | 159.313 | 72.093 | Tiled CUDA |
 
+Generate the versioned summary CSV and final crossover figure with:
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\plot_cpu_crossover.py
+```
+
+![Final paired CPU-CUDA crossover](visualization/output/cpu_cuda_crossover.png)
+
 The aggregate OpenMP-to-CUDA crossover is therefore between N=1,024 and
 N=2,048 on the development machine. The first tested CUDA win varies by
 initial-condition family: N=1,024 for uniform cube, N=2,048 for the Plummer
@@ -1272,7 +1280,7 @@ regenerated; the versioned validation CSV is the authoritative audit record.
 
 ## Known limitations and next steps
 
-1. Add a final summary plot for `results/cpu_cuda_crossover.csv` and record the crossover result in the project report.
+1. Record the completed CPU-CUDA crossover result in the final project report.
 2. Decide whether naïve CUDA belongs in an additional paired matrix or remains covered by the existing CUDA scaling study.
 3. Repeat the paired experiment on CARC or another CPU/GPU combination to measure how hardware changes the crossover point.
 4. Test stronger initializer-weight anchoring, richer aggregate-cell features, or a larger radial network only if additional ML development is in scope.
