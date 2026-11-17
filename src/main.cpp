@@ -55,13 +55,33 @@ int main(int argc, char** argv) {
                     #endif
                 }
                 case nbody::Implementation::serial:
+                    return nbody::simulate_serial(
+                        bodies,
+                        steps,
+                        config.dt,
+                        config.epsilon
+                    );
                 case nbody::Implementation::openmp:
-                    throw std::runtime_error("CPU simulation is not implemented yet");
+                    return nbody::simulate_openmp(
+                        bodies,
+                        steps,
+                        config.dt,
+                        config.epsilon,
+                        config.threads
+                    );
             }
             throw std::runtime_error("Invalid simulation implementation");
         };
 
-        // run a short CUDA warmup
+        // threads recorded in output: actual CPU threads for CPU backends
+        int threads_used = config.threads;
+        if (config.implementation == nbody::Implementation::serial) {
+            threads_used = 1;
+        } else if (config.implementation == nbody::Implementation::openmp) {
+            threads_used = nbody::openmp_thread_count(config.threads);
+        }
+
+        // run a short one-step warmup
         (void)run_simulation(1, nullptr);
 
         // get number of repetitions
@@ -101,6 +121,7 @@ int main(int argc, char** argv) {
                   << "  implementation: " << nbody::to_string(config.implementation) << '\n'
                   << "  bodies: " << bodies.size() << '\n'
                   << "  steps: " << config.steps << '\n'
+                  << "  threads: " << threads_used << '\n'
                   << "  seed: " << config.seed << '\n'
                   << "  repetitions: " << repetitions << '\n'
                   << "  median time: " << median_time << " ms\n";
@@ -154,7 +175,7 @@ int main(int argc, char** argv) {
                     << config.dt << ','
                     << config.epsilon << ','
                     << config.seed << ','
-                    << config.threads << ','
+                    << threads_used << ','
                     << config.block_size << ','
                     << (i + 1) << ','
                     << simulation_times[i] << ','
