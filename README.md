@@ -1,1337 +1,186 @@
-# CUDA N-Body Simulation and Machine-Learned Force Approximation
+# Accelerating N-Body Simulations with CPUs, CUDA, and Machine Learning
 
-This project studies the performance of gravitational N-body simulation on CPUs and GPUs and asks whether a machine-learning surrogate can reduce the work of the expensive all-pairs force calculation while retaining useful accuracy. The exact direct method requires every body to interact with every other body, so one force evaluation is O(N²). The project currently has working serial and OpenMP CPU solvers, naïve and shared-memory-tiled CUDA solvers, a velocity-Verlet integrator, four initial-condition families, a candidate ML dataset pipeline with independent label validation, and an octree-based exact-near/learned-far force prototype.
+This project studies how to make gravitational N-body simulations faster. The
+exact method calculates the force between every pair of bodies, so its cost
+grows as **O(N²)**. We compare exact CPU and CUDA implementations, then test
+whether a hierarchical machine-learning model can reduce the number of force
+calculations while keeping useful accuracy.
 
-Exact FP64 serial and OpenMP CPU backends are implemented and tested, including direct comparisons with both CUDA kernels and a tiled-CUDA trajectory. A stratified sample of 84 generated label snapshots has also passed independent serial validation. The completed CPU thread sweep selected 16 OpenMP threads, and the final paired force benchmark measured the local OpenMP-to-tiled-CUDA crossover between 1,024 and 2,048 bodies overall. The hierarchical ML prototype has been trained, evaluated across unseen counts and a held-out family, and tested in 175-step rollouts.
+> This README is a short presentation of the project. Full installation,
+> reproduction commands, implementation details, and complete experiment
+> results are in [project_overview.md](project_overview.md).
 
-## Research questions
+## Project questions
 
-The work is organized around four questions:
+1. When does a GPU become faster than serial and parallel CPU code?
+2. How much does a shared-memory tiled CUDA kernel improve performance?
+3. Can machine learning avoid evaluating every pairwise force?
+4. Does the ML speedup remain accurate across different physical systems?
 
-1. At what particle count does exact CUDA become faster than exact serial and OpenMP CPU implementations?
-2. How much does shared-memory tiling improve the CUDA force calculation?
-3. Can a sparse hierarchical model predict each body's acceleration accurately without explicitly evaluating every pair?
-4. If the learned model is accurate enough, is its complete preprocessing and inference pipeline actually faster than exact CPU or CUDA force evaluation?
+## Method
 
-The ML model must reduce the number of interactions. A neural network applied to every particle pair would remain O(N²) and would likely do more work than the analytical gravity equation.
-
-## Key findings
-
-- **Exact CPU versus GPU:** a sweep over 1, 2, 4, 8, and 16 OpenMP
-  threads selected 16 threads for the local CPU baseline. In the final paired
-  benchmark, 16-thread OpenMP was faster through N=1,024 and tiled CUDA was
-  faster from N=2,048 onward, placing the overall crossover between those two
-  tested sizes. At N=16,384, tiled CUDA was 2.21x faster than OpenMP and 18.33x
-  faster than serial CPU.
-- **The crossover depends on the system:** the first tested CUDA win occurred
-  at N=1,024 for the uniform cube, N=2,048 for the Plummer sphere and rotating
-  disk, and N=4,096 for the two-cluster collision. The reported crossover is
-  therefore a result for this hardware and workload, not a universal constant.
-- **CUDA optimization:** block size 64 was the best tested default. Shared-memory
-  tiling improved the earlier 10-step CUDA benchmark by about 1.29x–1.42x for
-  N=256 through N=2,048, while the advantage was small at larger tested sizes.
-- **Dataset correctness:** 84 saved CUDA-label snapshots were checked against
-  the independent serial FP64 solver. All passed the `1e-10` scaled tolerance;
-  the maximum scaled difference was `1.73e-15`.
-- **Machine-learned force approximation:** the hierarchical model reduces the
-  number of evaluated interactions as N grows and is faster than exact tiled
-  CUDA for some large, diffuse systems. The crossover is distribution-dependent:
-  concentrated systems retain more interactions and cause irregular CUDA tree
-  traversal. At the aggressive `theta=1.0` setting, all tested N=65,536 families
-  crossed in runtime, but only the uniform cube combined that speedup with low
-  force error. The project therefore demonstrates a performance–accuracy
-  tradeoff, not a universal replacement for the exact solver.
-- **Trajectory behavior:** exact-near interactions and the zero-net-force
-  correction make hierarchical 175-step rollouts substantially more accurate
-  than the fully learned O(N²) baseline. Errors remain largest for the held-out
-  rotating disk and increase when the opening angle is made more aggressive.
-
-## Current status
-
-| Component | Status |
-|---|---|
-| Deterministic body initialization | Implemented and tested |
-| Uniform-cube initial conditions | Implemented and tested |
-| Plummer-like sphere | Implemented and tested |
-| Two-cluster collision | Implemented and tested |
-| Rotating disk | Implemented and tested |
-| Naïve FP64 CUDA force calculation | Implemented and tested |
-| Shared-memory tiled FP64 CUDA force calculation | Implemented and tested |
-| CUDA velocity-Verlet integration | Implemented and tested |
-| Detailed CUDA timing and benchmark CSV output | Implemented |
-| CUDA scaling and block-size analyses | Completed on the development machine |
-| Candidate ML dataset generation and loading | Implemented; dataset generated locally and sampled labels independently validated |
-| PyTorch tensor, batching, and DataLoader pipeline | Implemented and tested |
-| Small-N fully connected force baseline | Implemented, trained, and evaluated |
-| Serial CPU force calculation and velocity-Verlet | Implemented and analytically tested |
-| OpenMP force calculation and velocity-Verlet | Implemented; bitwise agreement with serial tested |
-| CPU/GPU crossover analysis | Completed locally; overall OpenMP-to-tiled-CUDA crossover measured between N=1,024 and N=2,048 |
-| CPU/GPU crossover summary and figure | Generated, reproducible, and versioned |
-| Hierarchical exact-near/learned-far model | Geometry features, training, generalization tests, and rollouts implemented |
-| Compiled hierarchy and interaction builder | Implemented in C++ with parallel target traversal |
-| CUDA hierarchy traversal and interaction packing | Implemented and checked against the CPU builder |
-| CUDA labels validated against independent CPU FP64 | 84-snapshot stratified sample passed |
-| Final verification | CUDA Release build passed; 5/5 C++/CUDA tests and 29/29 Python tests passed |
-
-## Physical and numerical model
-
-For each body `i`, the direct solver evaluates the softened gravitational acceleration
-
-```text
-a_i = G * sum(j != i) m_j * (r_j - r_i)
-      / (|r_j - r_i|^2 + epsilon^2)^(3/2)
+```mermaid
+flowchart LR
+    A[Four initial-condition families] --> B[Exact solvers]
+    A --> C[Hierarchical ML solver]
+    B --> B1[Serial CPU]
+    B --> B2[OpenMP CPU]
+    B --> B3[Naive CUDA]
+    B --> B4[Tiled CUDA]
+    C --> C1[Exact nearby forces]
+    C --> C2[Learned far-field forces]
+    B1 --> D[Compare runtime and accuracy]
+    B2 --> D
+    B3 --> D
+    B4 --> D
+    C1 --> D
+    C2 --> D
+    D --> E[175-step trajectory tests]
 ```
 
-The code uses normalized units with `G = 1`, FP64 state and force calculations, configurable softening `epsilon`, and velocity-Verlet time integration. Softening prevents singular accelerations during extremely close encounters.
+The exact solvers use FP64 softened gravity and velocity-Verlet integration.
+The final experiments use four deterministic system families:
 
-Two exact GPU backends are available:
+- uniform cube;
+- Plummer-like sphere;
+- two-cluster collision; and
+- rotating disk.
 
-- `cuda_naive`: each GPU thread evaluates one target body and reads all source bodies from global memory.
-- `cuda_tiled`: source bodies are loaded into shared-memory tiles and reused by every thread in a block.
+The ML solver builds an octree. Nearby bodies are still calculated exactly,
+while distant groups are replaced by a learned center-of-mass interaction. The
+opening angle `theta` controls the tradeoff: a larger value removes more work
+but usually increases error.
 
-Both methods still perform O(N²) arithmetic. Tiling changes memory reuse and constant factors, not asymptotic complexity.
+## Finding 1: the CPU-GPU crossover occurs at a few thousand bodies
 
-## Requirements
+A CPU sweep selected **16 OpenMP threads** as the best local CPU configuration.
+The final paired benchmark used identical states, three seeds per family, five
+timed repetitions, CUDA block size 64, and body counts from 256 to 16,384.
 
-### CUDA-enabled build
-
-- An NVIDIA GPU supported by the installed CUDA toolkit
-- NVIDIA display/compute driver
-- CUDA toolkit, including `nvcc`
-- CMake 3.20 or newer
-- A C++17 compiler supported by the installed CUDA toolkit
-- Python 3 with `venv` for analysis and dataset preparation
-
-The completed local experiments used:
-
-- Windows `10.0.26200`
-- NVIDIA GeForce RTX 3060 Laptop GPU, 6 GB, compute capability 8.6
-- CUDA toolkit 12.8
-- NVIDIA driver 595.97
-- Visual Studio 2022/MSVC through MSBuild 17.14
-- CMake 4.4.4
-- Python 3.13.1
-
-Runtime measurements are machine-specific. New hardware should rerun the benchmark scripts instead of treating the included timings as universal.
-
-### Windows installation
-
-Install the following before configuring the project:
-
-1. Visual Studio 2022 with the **Desktop development with C++** workload and a Windows SDK.
-2. CMake, with `cmake` available in PowerShell.
-3. The NVIDIA driver and CUDA toolkit. The CUDA installer must be able to find a supported Visual Studio C++ toolset.
-4. Python 3.
-
-Verify the main tools:
-
-```powershell
-cmake --version
-nvcc --version
-nvidia-smi
-python --version
-```
-
-If CMake reports `No CUDA toolset found`, first verify that `nvcc --version` works, then confirm that Visual Studio's C++ workload was installed and that the CUDA toolkit supports that compiler version. Delete or use a new CMake build directory after fixing the installation so CMake performs CUDA detection again.
-
-### Linux or a cluster such as CARC
-
-Load site-provided compiler, CUDA, CMake, and Python modules. Exact module names vary by cluster, so inspect the available versions first:
-
-```bash
-module spider cuda
-module spider cmake
-module spider gcc
-```
-
-Then load a mutually compatible set, for example:
-
-```bash
-module load gcc
-module load cuda
-module load cmake
-module load python
-```
-
-The files `scripts/run_cpu.slurm` and `scripts/run_gpu.slurm` are templates. Before submitting them, add the correct CARC account, partition/constraint, and module commands. The CPU template now runs an OpenMP force sweep; adjust body counts, thread counts, memory, and wall time for the selected CARC node.
-
-## Get the code and Python environment
-
-From PowerShell in the repository root:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m pip install -r requirements-ml.txt
-```
-
-On Linux/macOS:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m pip install -r requirements-ml.txt
-```
-
-The base dependencies are pandas, matplotlib, seaborn, and PyArrow. The separate ML requirements file installs the official PyTorch 2.11 CUDA 12.8 build used by this project; it is a large download. For a CPU-only machine or a different CUDA runtime, use the command produced by the [official PyTorch installation selector](https://pytorch.org/get-started/locally/) instead.
-
-## Build
-
-### Windows CUDA build
-
-The scripts in this repository expect the Windows build directory to be named `build-cuda-explicit`:
-
-```powershell
-cmake -S . -B build-cuda-explicit -DNBODY_ENABLE_CUDA=ON
-cmake --build build-cuda-explicit --config Release
-```
-
-The executables are written to:
-
-```text
-build-cuda-explicit/Release/nbody.exe
-build-cuda-explicit/Release/nbody_generate_dataset.exe
-build-cuda-explicit/Release/nbody_benchmark_force.exe
-build-cuda-explicit/Release/nbody_validate_dataset.exe
-```
-
-### Linux CUDA build
-
-```bash
-cmake -S . -B build-cuda -DCMAKE_BUILD_TYPE=Release -DNBODY_ENABLE_CUDA=ON
-cmake --build build-cuda --parallel
-```
-
-### CPU-only build
-
-A CPU-only configuration builds the serial and OpenMP simulation backends,
-force benchmark, dataset validator, and CPU tests:
-
-```powershell
-cmake -S . -B build
-cmake --build build --config Release
-```
-
-Use `--implementation serial` or `--implementation openmp --threads N` with
-the resulting `nbody` executable. CMake uses the available OpenMP runtime when
-found; an OpenMP request reports an error at runtime if the build lacks OpenMP.
-
-## Run the tests
-
-Windows:
-
-```powershell
-ctest --test-dir build-cuda-explicit -C Release --output-on-failure
-```
-
-Linux:
-
-```bash
-ctest --test-dir build-cuda --output-on-failure
-```
-
-The CUDA-enabled suite contains five CTest targets:
-
-- deterministic default initialization;
-- deterministic, finite, centered initial-condition families with unit total mass and zero net momentum;
-- serial analytical forces, velocity-Verlet conservation, OpenMP/serial bitwise agreement, and serial/CUDA agreement;
-- naïve CUDA analytical one- and two-body forces, a non-block-aligned 257-body case, velocity-Verlet motion, and timing validation;
-- tiled CUDA analytical and 257-body comparisons against naïve CUDA, including block sizes 64 and 256.
-
-At the time of this README update, all five tests pass.
-
-Run the complete Python and ML unit-test suite with:
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
-```
-
-The final local verification passed all 29 Python tests, including variable-N
-batching, CUDA transfers, hierarchical CPU/CUDA interaction agreement,
-rotation equivariance, rollout physics, opening-angle parsing, and guarded
-checkpoint-selection logic.
-
-## Run a simulation
-
-Example tiled CUDA run on Windows:
-
-```powershell
-.\build-cuda-explicit\Release\nbody.exe `
-    --implementation cuda_tiled `
-    --bodies 4096 `
-    --steps 100 `
-    --dt 0.001 `
-    --epsilon 0.01 `
-    --seed 12345 `
-    --block-size 64 `
-    --repetitions 5
-```
-
-Use `cuda_naive` to select the naïve kernel. The program performs a one-step warmup, runs the requested number of timed repetitions, reports the median end-to-end time, and prints the first body's final position.
-
-Append each repetition and its timing breakdown to a CSV file with `--output`:
-
-```powershell
-.\build-cuda-explicit\Release\nbody.exe `
-    --implementation cuda_tiled `
-    --bodies 4096 `
-    --steps 10 `
-    --repetitions 5 `
-    --block-size 64 `
-    --output results\my_cuda_run.csv
-```
-
-The detailed timing columns are allocation, host-to-device transfer, CUDA kernels, device-to-host transfer, cleanup, CUDA-wrapper total, and outer end-to-end time. Run `nbody.exe --help` for all options.
-
-## CPU backends and paired CPU-CUDA crossover
-
-Run the exact CPU simulations with the same command-line program:
-
-```powershell
-.\build-cuda-explicit\Release\nbody.exe `
-    --implementation serial --bodies 1024 --steps 10 --repetitions 5
-
-.\build-cuda-explicit\Release\nbody.exe `
-    --implementation openmp --bodies 1024 --steps 10 `
-    --threads 8 --repetitions 5
-```
-
-The force-only benchmark accepts `serial`, `openmp`, `cuda_naive`, and
-`cuda_tiled` in one
-paired measurement path. Every implementation receives the same generated
-states, seeds, softening, warmup, and repetitions. `total_ms` is the common
-wall-clock force-evaluation measurement; the CUDA-only columns retain the
-allocation, transfer, kernel, cleanup, and CUDA-wrapper breakdown:
-
-```powershell
-.\build-cuda-explicit\Release\nbody_benchmark_force.exe `
-    --implementations serial,openmp,cuda_naive,cuda_tiled `
-    --body-counts 256,512,1024 --trajectories-per-count 1 `
-    --repetitions 3 --threads 8 --initial-condition uniform_cube `
-    --output results\force_smoke.csv
-```
-
-Prepare a CPU-only serial/OpenMP scaling CSV with:
-
-```powershell
-.\scripts\run_cpu_force_sweep.ps1 `
-    -BodyCounts 256,512,1024,2048,4096,8192 `
-    -ThreadCounts 1,2,4,8,16 `
-    -TrajectoriesPerCount 3 -Repetitions 5 -Overwrite
-```
-
-The equivalent Bash and CARC templates are `scripts/run_benchmarks.sh` and
-`scripts/run_cpu.slurm`. The completed local CPU sweep covered four
-initial-condition families, three seeds per body count, five repetitions, and
-thread counts 1, 2, 4, 8, and 16. Sixteen threads won 11 of the 12 large-N
-family/count cases from N=2,048 through N=8,192, so it was selected for the
-final paired comparison. The raw thread-selection measurements are stored in
-`results/cpu_force_sweep.csv`.
-
-### Final paired crossover experiment
-
-The final benchmark compares serial CPU, 16-thread OpenMP, and tiled CUDA on
-the exact same generated body states. It used:
-
-- `N = 256, 512, 1024, 2048, 4096, 8192, 16384`;
-- uniform cube, Plummer sphere, two-cluster collision, and rotating disk;
-- three deterministic seeds per family and body count;
-- one untimed warmup and five measured repetitions per case;
-- FP64 forces with `epsilon = 0.01`;
-- 16 OpenMP threads and CUDA block size 64; and
-- common wall-clock force-evaluation time (`total_ms`) as the comparison.
-
-Reproduce the complete Windows experiment from the repository root with:
-
-```powershell
-$executable = ".\build-cuda-explicit\Release\nbody_benchmark_force.exe"
-$output = ".\results\cpu_cuda_crossover.csv"
-$families = @(
-    "uniform_cube",
-    "plummer_sphere",
-    "two_cluster_collision",
-    "rotating_disk"
-)
-
-$append = $false
-for ($familyIndex = 0; $familyIndex -lt $families.Count; $familyIndex++) {
-    $family = $families[$familyIndex]
-    $baseSeed = 900000 + 100000 * $familyIndex
-    $benchmarkArgs = @(
-        "--implementations", "serial,openmp,cuda_tiled",
-        "--body-counts", "256,512,1024,2048,4096,8192,16384",
-        "--base-seed", $baseSeed,
-        "--trajectories-per-count", 3,
-        "--repetitions", 5,
-        "--threads", 16,
-        "--block-size", 64,
-        "--initial-condition", $family,
-        "--output", $output
-    )
-    if ($append) { $benchmarkArgs += "--append" }
-    & $executable @benchmarkArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "Paired benchmark failed for $family"
-    }
-    $append = $true
-}
-```
-
-The run produced all 1,260 expected timing rows. The following values are the
-median `total_ms` across all families, seeds, and repetitions:
-
-| Bodies | Serial CPU (ms) | OpenMP, 16 threads (ms) | Tiled CUDA (ms) | Fastest |
+| Bodies | Serial CPU | OpenMP CPU | Tiled CUDA | Fastest |
 |---:|---:|---:|---:|---|
-| 256 | 0.351 | 0.140 | 0.950 | OpenMP |
-| 512 | 1.617 | 0.474 | 1.168 | OpenMP |
-| 1,024 | 6.423 | 1.007 | 1.454 | OpenMP |
-| 2,048 | 24.362 | 5.456 | 2.820 | Tiled CUDA |
-| 4,096 | 79.254 | 28.702 | 7.735 | Tiled CUDA |
-| 8,192 | 325.323 | 67.993 | 23.683 | Tiled CUDA |
-| 16,384 | 1,321.438 | 159.313 | 72.093 | Tiled CUDA |
+| 256 | 0.351 ms | **0.140 ms** | 0.950 ms | OpenMP |
+| 1,024 | 6.423 ms | **1.007 ms** | 1.454 ms | OpenMP |
+| 2,048 | 24.362 ms | 5.456 ms | **2.820 ms** | CUDA |
+| 16,384 | 1,321.438 ms | 159.313 ms | **72.093 ms** | CUDA |
 
-Generate the versioned summary CSV and final crossover figure with:
+![Paired exact-force CPU-CUDA crossover](visualization/output/cpu_cuda_crossover.png)
 
-```powershell
-.\.venv\Scripts\python.exe .\scripts\plot_cpu_crossover.py
-```
+**Result:** the overall OpenMP-to-CUDA crossover is between **N=1,024 and
+N=2,048** on the development laptop. At N=16,384, tiled CUDA is **2.21x faster
+than OpenMP** and **18.33x faster than serial CPU**.
 
-![Final paired CPU-CUDA crossover](visualization/output/cpu_cuda_crossover.png)
+The crossover is also system-dependent. The first tested CUDA win occurs at
+N=1,024 for the uniform cube, N=2,048 for the Plummer sphere and rotating disk,
+and N=4,096 for the two-cluster collision.
 
-The aggregate OpenMP-to-CUDA crossover is therefore between N=1,024 and
-N=2,048 on the development machine. The first tested CUDA win varies by
-initial-condition family: N=1,024 for uniform cube, N=2,048 for the Plummer
-sphere and rotating disk, and N=4,096 for the two-cluster collision. At
-N=16,384, tiled CUDA is 2.21x faster than 16-thread OpenMP and 18.33x faster
-than serial CPU. This distribution dependence and the machine-specific nature
-of the result are why new hardware should rerun the paired matrix rather than
-reuse this crossover point. Raw measurements are stored in
-`results/cpu_cuda_crossover.csv`.
+## Finding 2: CUDA tiling helps most at smaller sizes
 
-Validate the saved tiled-CUDA dataset labels against independent serial FP64:
+The shared-memory tiled kernel reuses source-body data within each CUDA block.
+Block size **64** was the best tested default.
 
-```powershell
-.\scripts\validate_cpu_labels.ps1 -Overwrite
-```
+![Speedup from shared-memory CUDA tiling](visualization/output/cuda_optimized_tiled_speedup.png)
 
-The default selection checks the first and last saved snapshots of one
-trajectory for every shard family and particle count. The completed validation
-covered 84 snapshots across train, validation, interpolation, extrapolation,
-and held-out-disk data. Every snapshot passed the `1e-10` scaled tolerance; the
-largest scaled difference was `1.73e-15` and the largest relative L2 difference
-was `4.74e-16`. Detailed results are versioned in
-`results/cpu_label_validation.csv`.
+**Result:** tiling improved the earlier 10-step CUDA benchmark by about
+**1.29x–1.42x** from N=256 through N=2,048. At N=4,096 and above, the measured
+advantage was small on this GPU. Tiling improves constants, but both exact CUDA
+kernels still perform O(N²) work.
 
-## CUDA performance experiments
+## Finding 3: the hierarchy trades force calculations for error
 
-### Methodology
+The hierarchical model can replace many distant particle-particle interactions
+with a single learned aggregate interaction.
 
-The finalized local scaling experiment used both CUDA implementations with:
+![Hierarchical accuracy-work tradeoff](visualization/output/hierarchical_geometry_768.png)
 
-- `N = 256, 512, 1024, 2048, 4096, 8192, 16384`;
-- 10 velocity-Verlet steps per timed simulation;
-- one warmup simulation before measurement;
-- five measured repetitions per configuration;
-- median end-to-end runtime as the primary result;
-- fixed seed 12345, `dt = 0.001`, and `epsilon = 0.01`; and
-- CUDA block size 64.
+At N=768:
 
-End-to-end time includes allocation, transfers, kernel execution, result retrieval, and cleanup. It is therefore more representative than kernel-only timing.
+- `theta=0.7` retained about **52%–68%** of the direct interactions with
+  **0.77%–3.38%** relative force error.
+- `theta=1.2` retained about **19%–42%** of the interactions, but error increased
+  to **4.32%–9.69%**.
 
-### Scaling results
+**Result:** the model does reduce the O(N²) force workload, especially as N
+grows, but removing more interactions produces a clear accuracy cost.
 
-| Bodies | Naïve median (ms) | Tiled median (ms) | Naïve / tiled speedup |
-|---:|---:|---:|---:|
-| 256 | 3.307 | 2.327 | 1.421x |
-| 512 | 5.554 | 4.287 | 1.296x |
-| 1,024 | 10.178 | 7.812 | 1.303x |
-| 2,048 | 27.655 | 21.412 | 1.292x |
-| 4,096 | 62.480 | 62.191 | 1.005x |
-| 8,192 | 206.973 | 204.818 | 1.011x |
-| 16,384 | 754.738 | 744.672 | 1.014x |
+## Finding 4: ML speedup depends strongly on the physical system
 
-![CUDA runtime scaling](visualization/output/cuda_optimized_scaling.png)
+The large-N paired experiment compares the complete sparse-ML pipeline with
+the complete exact tiled-CUDA force calculation. A value below 1 means ML is
+faster.
 
-The tiled kernel produced a 1.29x-1.42x end-to-end speedup from 256 through 2,048 bodies. On this RTX 3060 Laptop GPU the advantage nearly disappeared at 4,096 bodies and above. This shows that shared-memory tiling is helpful, but not automatically better by a large factor at every problem size or on every GPU.
+![Multi-family ML and exact-CUDA crossover](visualization/output/crossover_matrix.png)
 
-![Tiled CUDA speedup](visualization/output/cuda_optimized_tiled_speedup.png)
+At the conservative `theta=0.7` setting and N=65,536:
 
-### Timing breakdown
+| Initial condition | ML / exact time | Relative force error | Interpretation |
+|---|---:|---:|---|
+| Uniform cube | **0.70x** | **1.86%** | Faster with low error |
+| Rotating disk | **0.81x** | 17.78% | Faster, but inaccurate |
+| Plummer sphere | 13.37x | 15.44% | Slower and inaccurate |
+| Two-cluster collision | 12.21x | 20.66% | Slower and inaccurate |
 
-![CUDA timing breakdown](visualization/output/cuda_optimized_timing_breakdown.png)
+Concentrated systems create deeper, more irregular trees. They retain more
+near-field interactions and cause greater CUDA traversal divergence, so the
+same model behaves very differently across families.
 
-At small N, allocation, cleanup, transfers, and wrapper overhead are visible portions of total time. Kernel execution becomes dominant as N grows: for both implementations it accounts for more than 98% of CUDA-wrapper time by N = 4096 and about 99.8% by N = 16384. This is why transfer optimization alone cannot solve the large-N O(N²) cost.
+At the aggressive `theta=1.0` setting, the guarded model became faster than
+exact CUDA for every family at N=65,536, but only the uniform cube kept low
+force error:
 
-### CUDA block-size sweep
+| Initial condition | ML / exact time | Relative force error |
+|---|---:|---:|
+| Uniform cube | **0.28x** | **2.27%** |
+| Rotating disk | **0.34x** | 25.65% |
+| Plummer sphere | **0.70x** | 11.38% |
+| Two-cluster collision | **0.66x** | 12.43% |
 
-The refined sweep tested block sizes 32, 64, 96, and 128 at N = 1024, 4096, and 16384, with five repetitions per point.
+**Result:** a broad runtime crossover exists at large N, but a broad
+**accuracy-and-speed crossover does not**.
 
-![CUDA block-size sweep](visualization/output/cuda_block_sweep_refined.png)
+## Finding 5: exact-near interactions improve trajectory stability
 
-The fastest block size was not universal:
+The learned acceleration is inserted into velocity-Verlet and compared with
+exact CUDA trajectories for 175 steps. A zero-net-force correction prevents
+spurious center-of-mass acceleration.
 
-| Implementation | N = 1,024 | N = 4,096 | N = 16,384 |
-|---|---:|---:|---:|
-| Naïve | 64 | 96 | 64 |
-| Tiled | 64 | 32 | 96 |
+![Hierarchical rollout error](visualization/output/rollout_hierarchical/rollout_errors.png)
 
-Block size 64 remains the project default because it is a simple common setting, was best at N = 1024 for both methods, and performed well at the largest tested size. It is not claimed to be optimal for every N; performance-sensitive experiments should sweep block size on the target GPU.
+| Evaluation | Final position RMSE | Relative energy drift |
+|---|---:|---:|
+| Validation families, N=128 | **1.96e-5** | **3.09e-5** |
+| Held-out rotating disk, N=256 | 1.55e-4 | 2.98e-4 |
 
-### Reproduce the CUDA analysis
+The hierarchical rollout is much more accurate than the fully learned O(N²)
+baseline because nearby interactions remain exact. The held-out disk remains
+the hardest case, showing that generalization is still the main limitation.
 
-Run the standard scaling matrix:
+## Conclusions
 
-```powershell
-.\scripts\run_cuda_benchmarks.ps1
-```
-
-The script appends to `results/cuda_optimized_scaling.csv`; move or remove an existing file first if a clean experiment is required. Generate the published-style summary and plots:
-
-```powershell
-.\.venv\Scripts\python.exe .\scripts\plot_results.py `
-    --input results\cuda_optimized_scaling.csv `
-    --summary-output results\cuda_optimized_scaling_summary.csv `
-    --output visualization\output\cuda_optimized_scaling.png `
-    --breakdown-output visualization\output\cuda_optimized_timing_breakdown.png `
-    --speedup-output visualization\output\cuda_optimized_tiled_speedup.png
-```
-
-Reproduce the refined block-size sweep and plot:
-
-```powershell
-.\scripts\run_cuda_block_sweep.ps1 `
-    -BodyCounts 1024,4096,16384 `
-    -BlockSizes 32,64,96,128 `
-    -Steps 10 `
-    -Repetitions 5 `
-    -OutputPath results\cuda_block_sweep_refined.csv `
-    -Overwrite
-
-.\.venv\Scripts\python.exe .\scripts\plot_block_sweep.py `
-    --input results\cuda_block_sweep_refined.csv `
-    --summary-output results\cuda_block_sweep_refined_summary.csv `
-    --best-output results\cuda_block_sweep_refined_best.csv `
-    --output visualization\output\cuda_block_sweep_refined.png
-```
-
-The final raw measurements, summaries, and plots used above are versioned in `results/` and `visualization/output/`. Other generated experiment files remain ignored by Git.
-
-## Candidate ML dataset
-
-### Purpose
-
-The learned model will receive a complete particle state and predict the acceleration `(ax, ay, az)` of every body. The current direction is a sparse hierarchical graph or hybrid near-field/far-field model; a fully connected GNN would preserve the O(N²) interaction count and is only suitable as a small-N baseline.
-
-The dataset labels are exact direct-summation FP64 accelerations from tiled CUDA. Selected snapshots are checked against naïve FP64 CUDA during generation. All sampled comparisons in the completed candidate generation had a maximum naïve/tiled acceleration difference of zero.
-
-### Initial-condition families
-
-- `uniform_cube`: random positions in a cube with small random velocities;
-- `plummer_sphere`: a truncated Plummer-like spherical distribution;
-- `two_cluster_collision`: two separated Plummer-like clusters moving toward each other; and
-- `rotating_disk`: a thin rotating disk used only as a held-out-family test.
-
-Each generated system has positive equal masses summing to one, a centered center of mass, and zero net momentum.
-
-### Fixed dataset matrix
-
-The complete matrix is stored in `ml/dataset_matrix.json`.
-
-| Split/evaluation | Families | Particle counts | Trajectories per family/count |
-|---|---|---|---:|
-| Train | cube, Plummer, two-cluster | 128, 256, 512, 1024, 2048 | 10 |
-| Validation: unseen seeds | cube, Plummer, two-cluster | 128, 256, 512, 1024, 2048 | 2 |
-| Test: interpolation counts | cube, Plummer, two-cluster | 768, 1536 | 4 |
-| Test: extrapolation count | cube, Plummer, two-cluster | 3072 | 4 |
-| Test: held-out family | rotating disk | 256, 1024, 2048 | 4 |
-
-Every trajectory contributes eight snapshots separated by 25 integration steps. Seeds and complete trajectories are disjoint across splits, preventing temporal leakage.
-
-The generated candidate contains:
-
-- 228 trajectories;
-- 1,824 snapshots;
-- 1,765,376 body rows;
-- 1,200 training snapshots;
-- 240 validation snapshots; and
-- 384 test snapshots.
-
-On the development machine, the raw CSV shards occupy about 596 MB and the compressed Parquet copy about 143 MB. Dataset files are ignored by Git and must be generated locally.
-
-### Preview or edit the matrix
-
-Preview the work without generating anything:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\generate_full_dataset.py --dry-run
-```
-
-Edit `ml/dataset_matrix.json` to change families, particle counts, trajectory counts, seeds, snapshot spacing, or physical parameters. Keep seed ranges disjoint.
-
-### Generate the raw dataset
-
-Build the CUDA project first, then run:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\generate_full_dataset.py
-```
-
-On Linux, override the Windows-oriented default generator path:
-
-```bash
-.venv/bin/python ml/generate_full_dataset.py \
-    --generator build-cuda/nbody_generate_dataset
-```
-
-For a rerun that replaces existing shards:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\generate_full_dataset.py --overwrite
-```
-
-The raw output is written to:
-
-```text
-data/raw/candidate_v1/
-├── manifest.csv
-├── metadata.json
-└── one CSV file per split/evaluation/family shard
-```
-
-Generate only one split with `--only-split train`, `--only-split validation`, or `--only-split test`. Run `ml/generate_full_dataset.py --help` for path overrides.
-
-### Validate and prepare the model-ready dataset
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\prepare_full_dataset.py
-```
-
-Use `--overwrite` when replacing an existing processed dataset. The preparation step checks:
-
-- expected row counts;
-- required columns and finite numeric values;
-- positive masses and characteristic scales;
-- family consistency;
-- unique trajectory/snapshot/body keys;
-- complete snapshots; and
-- body IDs exactly covering `0` through `N-1`.
-
-It then writes compressed Parquet shards and supporting metadata:
-
-```text
-data/processed/candidate_v1/
-├── train/
-├── validation/
-├── test/
-├── manifest.csv
-├── metadata.json
-├── normalization.json
-└── snapshot_index.parquet
-```
-
-### Normalization
-
-With characteristic radius `R`, total mass `M`, and `G = 1`, the loader applies:
-
-```text
-position     / R
-velocity     / sqrt(M / R)
-mass         / M
-acceleration / (M / R^2)
-epsilon      / R
-```
-
-Empirical means and standard deviations after physical scaling are fitted using the training split only and stored in `normalization.json`. Validation and test data never influence these statistics.
-
-### Explore and sanity-check the dataset
-
-Run the complete exploratory analysis after preparing the Parquet dataset:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\analyze_dataset.py
-```
-
-The analysis validates all numeric rows, summarizes normalized position, velocity, acceleration, and softening distributions, measures center-of-mass, momentum, and net-force residuals for every snapshot, and examines representative and maximum-acceleration close encounters. It writes tables and a Markdown report to `results/dataset_analysis/` and plots to `visualization/output/dataset_analysis/`.
-
-The current candidate passed all finite-value and completeness checks. Across 1,824 snapshots, the maximum normalized center-of-mass residual was `2.33e-15`, the maximum relative momentum residual was `1.05e-15`, and the maximum relative net-force residual was `2.58e-16`. These are consistent with FP64 roundoff.
-
-![Normalized acceleration distributions](visualization/output/dataset_analysis/normalized_acceleration_ecdf.png)
-
-The acceleration targets are strongly family-dependent and heavy-tailed. Median normalized magnitudes range from about 0.28 for Plummer-like spheres to 1.73 for the held-out rotating disks. The largest target is about 267.6 in a two-cluster training example. Maximum-acceleration snapshot checks associate the extreme labels with close encounters, so they should not simply be discarded; a robust loss or deliberate sample weighting should be tested during training.
-
-![Dataset physical residuals](visualization/output/dataset_analysis/snapshot_residuals.png)
-
-### Load variable-size PyTorch batches
-
-`NBodyTorchDataset` converts complete snapshots to tensors. `make_dataloader` concatenates variable-size systems without padding and returns `batch_index` and `ptr` arrays that preserve the exact system boundaries:
-
-```python
-import torch
-
-from ml.torch_dataset import make_dataloader
-
-loader = make_dataloader(
-    "data/processed/candidate_v1",
-    split="train",
-    normalize=True,
-    max_snapshots=4,
-    max_particles=4096,
-)
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-for batch in loader:
-    inputs = batch["node_features"].to(device, non_blocking=True)
-    targets = batch["accelerations"].to(device, non_blocking=True)
-    batch_index = batch["batch_index"].to(device, non_blocking=True)
-    ptr = batch["ptr"]
-    break
-```
-
-The default node features are normalized `(x, y, z, mass)`. Velocities are still returned separately for integration but are excluded from force-model inputs because Newtonian acceleration does not depend on velocity. Set `include_velocity_features=True` only for an explicit ablation study.
-
-The particle budget prevents a batch containing several large systems from unexpectedly exhausting GPU memory. Batches stay within one Parquet shard, and each shard's batches remain contiguous so the loader can reuse its one-shard cache. Training still shuffles the shard order and the snapshots within each shard. At the start of each epoch, call `loader.batch_sampler.set_epoch(epoch)` to obtain a deterministic new order.
-
-Filter test cases with `evaluation_group="interpolation_counts"`, `"extrapolation_count"`, or `"held_out_family"`. Verify the complete tensor pipeline with:
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_torch_dataset.py -v
-```
-
-### Small-N pairwise baseline
-
-`PairwiseForceBaseline` is a fully connected, rotation-equivariant correctness baseline. It learns a scalar radial interaction from softened distance, multiplies it by source mass, and sums the resulting displacement messages for each target body. It is translation invariant and rotation equivariant, but still evaluates all directed pairs and remains O(N²); it is not the proposed scalable model.
-
-Train the default baseline on N=128 snapshots from the three training families:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\train_baseline.py --epochs 30
-```
-
-Training uses FP32, Huber loss, AdamW, cosine learning-rate decay, unseen-seed validation, and best-checkpoint selection. The completed RTX 3060 run used 240 training and 48 validation snapshots and finished in about 105 seconds. The best checkpoint was epoch 30:
-
-| Evaluation | MSE | MSE / zero predictor | MAE | Mean relative vector error | Mean direction cosine |
-|---|---:|---:|---:|---:|---:|
-| Unseen seeds, N=128 | 0.1272 | 0.484% | 0.0892 | 13.79% | 0.99787 |
-| Unseen count N=768, trained families | 0.00794 | 0.796% | 0.0482 | 12.07% | 0.99923 |
-| Held-out rotating disk, N=256 | 0.6658 | 7.50% | 0.4551 | 28.24% | 0.99640 |
-
-![Pairwise baseline training history](visualization/output/ml_baseline_history.png)
-
-The model learns acceleration direction very well, but close encounters make magnitude errors and per-epoch MSE volatile. The held-out disk is substantially harder than unseen seeds or unseen N from trained families, confirming that this split tests genuine distribution shift.
-
-Reproduce the evaluations with:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\evaluate_baseline.py `
-    --split validation --body-counts 128 `
-    --output results\ml_baseline\validation_metrics.csv
-
-.\.venv\Scripts\python.exe .\ml\evaluate_baseline.py `
-    --split test --evaluation-group interpolation_counts --body-counts 768 `
-    --output results\ml_baseline\interpolation_768_metrics.csv
-
-.\.venv\Scripts\python.exe .\ml\evaluate_baseline.py `
-    --split test --evaluation-group held_out_family --body-counts 256 `
-    --output results\ml_baseline\heldout_disk_256_metrics.csv
-```
-
-The best checkpoint is saved locally under `results/ml_baseline/best_model.pt` and remains ignored by Git. Configuration, history, summaries, and evaluation tables are retained.
-
-### Autoregressive rollout evaluation
-
-One-step force accuracy does not guarantee a stable simulation because every predicted acceleration changes the state used for the next prediction. `rollout_baseline.py` inserts either exact direct forces or the learned pairwise model into velocity-Verlet and compares against the eight saved CUDA checkpoints from steps 0 through 175.
-
-The prepared dataset uses normalized position, velocity, mass, acceleration, and softening. The rollout therefore converts the stored physical time step using `dt_normalized = dt * sqrt(M / R^3)` before integration.
-
-First validate the Python rollout with FP64 direct forces:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\rollout_baseline.py `
-    --predictor exact --split validation --body-counts 128
-```
-
-Across all six N=128 validation trajectories, the exact Python rollout reproduced the CUDA final positions with overall RMSE `2.72e-16` after 175 steps. This verifies the unit conversion, force expression, snapshot alignment, and velocity-Verlet implementation independently of the learned model.
-
-Run the learned-force rollout:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\rollout_baseline.py `
-    --predictor learned --split validation --body-counts 128
-```
-
-Mean errors at the final saved checkpoint are:
-
-| Family | Position RMSE | Velocity RMSE | Force RMSE on exact state | Relative energy drift |
-|---|---:|---:|---:|---:|
-| Plummer sphere | 7.94e-4 | 9.95e-3 | 6.73e-2 | 1.11e-3 |
-| Two-cluster collision | 6.68e-5 | 8.82e-3 | 4.44e-1 | 1.51e-3 |
-| Uniform cube | 4.82e-4 | 2.45e-2 | 5.64e-1 | 2.24e-3 |
-| Overall | **4.47e-4** | **1.44e-2** | **3.58e-1** | **1.62e-3** |
-
-Overall learned-rollout momentum drift was `8.54e-9`. The exact-force rollout's mean relative energy drift was `8.21e-6`, representing normal finite-step velocity-Verlet error, while the learned rollout's larger drift includes force-approximation error.
-
-The held-out rotating disk at N=256 is substantially harder. Across its four trajectories, final mean position RMSE was `5.67e-3`, velocity RMSE was `1.03e-1`, force RMSE was `1.19`, and relative energy drift was `2.51e-2`. This approximately tenfold increase in position error and order-of-magnitude increase in energy drift show that the one-step held-out-family accuracy gap compounds during integration.
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\rollout_baseline.py `
-    --predictor learned --split test `
-    --evaluation-group held_out_family --body-counts 256 `
-    --output-dir results\rollout_learned_disk `
-    --figure-dir visualization\output\rollout_learned_disk
-```
-
-![Learned autoregressive rollout errors](visualization/output/rollout_learned/rollout_errors.png)
-
-![Final exact and learned positions](visualization/output/rollout_learned/rollout_final_positions.png)
-
-The rollout remains close over this short horizon, but velocity and energy errors accumulate. Longer horizons and the held-out disk should be tested before claiming long-term stability. Per-trajectory results are stored under `results/rollout_exact/` and `results/rollout_learned/`.
-
-### Hierarchical exact-near/learned-far prototype
-
-`HierarchicalForceModel` builds an octree for each snapshot. Leaf particles and nearby cells are evaluated with the exact softened-gravity expression, while sufficiently distant cells are replaced by one learned center-of-mass interaction. The far-field interaction uses the radial network copied from the trained pairwise baseline. The hierarchical opening angle `theta` controls the tradeoff: `theta=0` opens every cell and reproduces direct all-pairs forces, while larger values accept more aggregate cells and evaluate fewer interactions.
-
-The aggregate network receives softened distance, softening, `cell_size / distance`, cell occupancy, and `rms_radius / distance`. Its first two input weights are initialized from the pairwise accuracy baseline, while the geometry-feature weights start at zero. It is then fine-tuned end to end at `theta=1.0`; exact nearby interactions remain fixed and gradients update only the aggregate radial network.
-
-The zero-angle unit test reproduces direct force to tight floating-point tolerance and checks that exactly `N(N-1)` directed body interactions are evaluated. The trained sparse model gives the following accuracy/work ranges:
-
-| N | θ | Interaction ratio range | Relative L2 force-error range |
-|---:|---:|---:|---:|
-| 128 | 0.0 | 100% | approximately 2e-7 to 2e-6 |
-| 128 | 0.7 | 77.6%–91.2% | 0.143%–1.17% |
-| 128 | 1.2 | 55.2%–67.8% | 1.23%–4.25% |
-| 768 | 0.7 | 51.7%–67.9% | 0.766%–3.38% |
-| 768 | 1.2 | 19.1%–41.9% | 4.32%–9.69% |
-
-These results demonstrate the intended accuracy-versus-work tradeoff and show that the interaction reduction improves as N grows. They do **not** yet establish a speedup over tiled CUDA. The original reference octree and traversal are built in Python on the CPU. A compiled OpenMP backend now removes most of that overhead, but a production comparison still requires a GPU-resident hierarchy and the same hardware/timing protocol as the exact solvers.
-
-Across all 240 N=128 training snapshots and 48 validation snapshots, fine-tuning reduced validation MSE from `2.94468e-4` to `2.13521e-4`, a 27.5% validation-loss reduction. At N=768 and `theta=0.7`, relative L2 force error was 3.38% for the Plummer sphere, 1.76% for the two-cluster collision, and 0.766% for the uniform cube. The checkpoint is kept only when it improves over its initialized validation score.
-
-The held-out rotating disk gives a useful accuracy/work curve:
-
-| θ | Interactions retained | Relative L2 force error |
-|---:|---:|---:|
-| 0.5 | 97.2% | 0.196% |
-| 0.7 | 88.3% | 0.744% |
-| 1.0 | 62.4% | 2.69% |
-| 1.2 | 51.5% | 3.93% |
-
-Train and evaluate the fine-tuned far field with:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\train_hierarchical.py `
-    --epochs 10 --theta 1.0 --body-counts 128 --device cuda
-
-.\.venv\Scripts\python.exe .\ml\evaluate_hierarchical.py `
-    --hierarchical-checkpoint results\ml_hierarchical_geometry\best_model.pt `
-    --theta 0,0.3,0.5,0.7,1.0,1.2 `
-    --snapshots-per-case 2 --body-counts 128 --device cuda `
-    --output-dir results\hierarchical_geometry_validation `
-    --figure visualization\output\hierarchical_geometry_validation.png
-```
-
-The local checkpoint `results/ml_hierarchical_geometry/best_model.pt` is ignored by Git, while its configuration, learning history, summary, evaluation tables, and figures are versioned.
-
-Evaluate unseen N=768 with:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\evaluate_hierarchical.py `
-    --hierarchical-checkpoint results\ml_hierarchical_geometry\best_model.pt `
-    --split test --evaluation-group interpolation_counts `
-    --theta 0,0.5,0.7,1.0,1.2 `
-    --snapshots-per-case 1 --body-counts 768 --device cuda `
-    --output-dir results\hierarchical_geometry_768 `
-    --figure visualization\output\hierarchical_geometry_768.png
-```
-
-![N=128 hierarchical accuracy-work tradeoff](visualization/output/hierarchical_geometry_validation.png)
-
-![N=768 hierarchical accuracy-work tradeoff](visualization/output/hierarchical_geometry_768.png)
-
-### End-to-end sparse-force benchmark
-
-The reproducible benchmark includes input transfer, CPU tree input copying,
-octree construction and traversal, interaction-list transfer, exact/learned
-force evaluation, and the momentum-conservation projection. It performs one
-warm-up followed by five measured repetitions and reports medians:
-
-```powershell
-.\.venv\Scripts\python.exe .\setup_ml_extension.py build_ext --inplace
-.\.venv\Scripts\python.exe .\ml\benchmark_hierarchical.py `
-    --backend cuda --device cuda `
-    --output-dir results\hierarchical_benchmark_cuda `
-    --figure visualization\output\hierarchical_benchmark_cuda.png
-```
-
-The first command builds both optional native backends. The CPU backend uses
-C++17 and OpenMP. The CUDA backend keeps compact tree construction on the CPU,
-transfers that small tree, then counts and packs interactions with two CUDA
-traversal passes. The full variable-length interaction list is created directly
-on the GPU. Use `--backend python`, `cpp`, or `cuda` to select explicitly;
-`auto` prefers CUDA for CUDA tensors and otherwise falls back safely.
-
-The default sweep uses one deterministic uniform-cube snapshot at each
-available size from N=128 through N=3072. Detailed repetitions are written to
-`results/hierarchical_benchmark/per_run.csv`, medians to `summary.csv`, and a
-long-form comparison with the existing tiled-CUDA measurements to
-`combined_methods.csv`. `config.json` records the device, software versions,
-checkpoint, and benchmark settings.
-
-On the RTX 3060 Laptop GPU used for the included run, the sparse method retained
-78.2% of direct interactions at N=128 and 13.8% at N=3072. Relative L2 force
-error was 0.37% and 1.38%, respectively. The compiled backend preserves those
-results while substantially reducing runtime:
-
-| N | Python builder | Compiled CPU | CUDA traversal | Python→CUDA speedup |
-|---:|---:|---:|---:|---:|
-| 128 | 25.0 ms | 4.31 ms | 3.61 ms | 6.9x |
-| 512 | 263.9 ms | 13.4 ms | 5.38 ms | 49.1x |
-| 1,024 | 581.0 ms | 37.2 ms | 9.49 ms | 61.2x |
-| 2,048 | 1,056 ms | 55.5 ms | 12.1 ms | 87.2x |
-| 3,072 | 1,943 ms | 127.1 ms | 16.3 ms | 119.5x |
-
-The CUDA backend preserves the CPU builder's interaction counts and changes
-accelerations only by normal floating-point accumulation-order noise. At
-N=3072, compact CPU tree construction takes 0.49 ms, compact-tree transfer takes
-0.40 ms, CUDA traversal takes 2.15 ms, and force evaluation takes 12.3 ms. The
-result is still **not a runtime speedup over tiled CUDA** at shared sizes: at
-N=2048, one sparse prediction takes 12.1 ms while the existing tiled-CUDA
-benchmark amortizes to 2.14 ms per simulation step. The gap has nevertheless
-fallen from roughly 493x for the Python prototype to 5.7x.
-
-The CUDA line divides each existing 10-step runtime by ten to report an
-amortized per-step value. It is an independent benchmark rather than a paired
-run on the exact same snapshots, and an integration step is not identical to a
-standalone force prediction. It is suitable for identifying the large current
-performance gap but not for a final speedup claim. A final comparison must run
-both methods under one timing protocol on the same machine and inputs.
-
-![Sparse learned-force benchmark](visualization/output/hierarchical_benchmark.png)
-
-![Compiled sparse learned-force benchmark](visualization/output/hierarchical_benchmark_cpp.png)
-
-![CUDA-traversed sparse learned-force benchmark](visualization/output/hierarchical_benchmark_cuda.png)
-
-### Paired large-N crossover experiment
-
-The initial CUDA comparison above came from an older simulation benchmark. A
-new force-only CUDA executable now times exactly one tiled FP64 acceleration
-calculation, including allocation, input transfer, kernel execution, output
-transfer, and cleanup. `benchmark_large_n.py` generates one matching
-uniform-cube state and tiled-CUDA acceleration label at each size, then times
-the FP32 sparse model on that same state. Both methods use five measured runs
-after warm-up; model and process startup are excluded.
-
-Build and reproduce the paired experiment with:
-
-```powershell
-cmake --build build-cuda-explicit --config Release `
-    --target nbody_benchmark_force nbody_generate_dataset
-
-.\.venv\Scripts\python.exe .\setup_ml_extension.py build_ext --inplace
-
-.\.venv\Scripts\python.exe .\ml\benchmark_large_n.py `
-    --device cuda `
-    --body-counts 4096,8192,16384,32768,65536 `
-    --regenerate
-```
-
-The RTX 3060 Laptop GPU results show a measured crossover between N=32768 and
-N=65536:
-
-| N | Sparse ML | Exact tiled CUDA | ML / exact | Interactions retained | Relative L2 force error |
-|---:|---:|---:|---:|---:|---:|
-| 4,096 | 22.2 ms | 6.12 ms | 3.63x | 13.51% | 1.25% |
-| 8,192 | 51.5 ms | 18.9 ms | 2.72x | 7.73% | 1.65% |
-| 16,384 | 97.4 ms | 67.6 ms | 1.44x | 2.53% | 1.97% |
-| 32,768 | 301.8 ms | 263.8 ms | 1.14x | 2.22% | 1.92% |
-| 65,536 | **708.7 ms** | **1,056.4 ms** | **0.67x** | **1.25%** | **1.86%** |
-
-At N=65536, the sparse pipeline is 1.49x faster than the complete exact force
-wrapper and also faster than the exact kernel alone (1054 ms). This is evidence
-that reducing interactions can overcome hierarchy and neural-network overhead
-at sufficiently large N on this hardware. It is not yet a universal crossover
-claim: the sweep uses one uniform-cube state per size, FP32 for ML versus FP64
-for the exact solver, and one GPU. Additional families, seeds, GPUs, and
-trajectory rollouts are required before the final conclusion.
-
-Detailed runs, stage medians, configuration, and the joined comparison are in
-`results/large_n_crossover/`.
-
-![Paired large-N crossover](visualization/output/large_n_crossover.png)
-
-### Multi-family and multi-seed crossover validation
-
-The single-seed uniform-cube crossover is real but not general. The validation
-matrix repeats the paired experiment with three independent seeds for each of
-four initial-condition families at N=32768 and N=65536, for 24 paired cases and
-five timing repetitions per method and case:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\benchmark_crossover_matrix.py `
-    --device cuda --regenerate
-```
-
-Median results across the three seeds are:
-
-| Family | N | ML / exact time | ML wins | Interactions retained | Relative L2 force error |
-|---|---:|---:|---:|---:|---:|
-| Uniform cube | 32,768 | 1.20x | 0/3 | 2.22% | 1.91% |
-| Uniform cube | 65,536 | **0.70x** | **3/3** | 1.25% | 1.86% |
-| Rotating disk | 32,768 | 1.20x | 0/3 | 2.18% | 16.43% |
-| Rotating disk | 65,536 | **0.81x** | **3/3** | 1.26% | 17.78% |
-| Plummer sphere | 32,768 | 3.31x | 0/3 | 6.41% | 14.81% |
-| Plummer sphere | 65,536 | 13.37x | 0/3 | 3.36% | 15.44% |
-| Two-cluster collision | 32,768 | 3.76x | 0/3 | 6.17% | 18.96% |
-| Two-cluster collision | 65,536 | 12.21x | 0/3 | 3.16% | 20.66% |
-
-At N=65536, ML is faster for all six uniform-cube and rotating-disk cases but
-slower for all six concentrated Plummer and collision cases. Only the uniform
-cube combines a speedup with low force error. The disk crossover is not yet
-scientifically useful because its roughly 18% error is too large, while the
-Plummer and collision cases have both poor accuracy and severe traversal
-slowdowns. Deep, irregular trees cause high GPU branch divergence and retain
-more near-field interactions than diffuse systems.
-
-Across all families, no N=32768 case is faster. At N=65536, 50% of cases are
-faster, but the median family/seed case remains 6.50x slower because the two
-concentrated families are expensive. The defensible conclusion is therefore a
-**distribution-dependent crossover**, not a universal one. The current model
-and CUDA traversal are effective for diffuse uniform states but require more
-diverse large-N training and a better irregular-tree traversal before making a
-general speedup claim.
-
-Detailed per-run, per-case, per-family, and overall summaries are stored in
-`results/crossover_matrix/`.
-
-![Multi-family crossover validation](visualization/output/crossover_matrix.png)
-
-### Controlled large-N fine-tuning experiment
-
-The next model experiment resumed the hierarchical checkpoint at the benchmark
-setting `theta=0.7` and fine-tuned it on reproducibly sampled N=512, 1024, and
-2048 states. Training used eight snapshots per family/count and validation used
-four, for 72 training and 36 validation snapshots. The three training families
-were uniform cube, Plummer sphere, and two-cluster collision; the rotating disk
-remained completely held out. Run it with:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\train_hierarchical.py `
-    --initializer results\ml_hierarchical_geometry\best_model.pt `
-    --output-dir results\ml_hierarchical_large_n `
-    --figure visualization\output\ml_hierarchical_large_n_history.png `
-    --body-counts 512,1024,2048 --theta 0.7 `
-    --interaction-backend cuda --epochs 5 --learning-rate 5e-5 `
-    --minimum-learning-rate 1e-6 --max-snapshots 1 `
-    --max-particles 2048 --training-snapshots-per-case 8 `
-    --validation-snapshots-per-case 4 --device cuda
-```
-
-Validation loss improved 26.2%, from `2.940e-4` to `2.169e-4`, but that pooled
-metric hid a large family tradeoff when the unchanged 24-case crossover matrix
-was rerun. Collision error improved sharply, while every other family regressed:
-
-| Family | N | Original error | Fine-tuned error | Fine-tuned ML / exact time |
-|---|---:|---:|---:|---:|
-| Uniform cube | 32,768 | 1.91% | 7.27% | 1.17x |
-| Uniform cube | 65,536 | 1.86% | 8.01% | **0.69x** |
-| Plummer sphere | 32,768 | 14.81% | 15.73% | 3.39x |
-| Plummer sphere | 65,536 | 15.44% | 16.63% | 14.15x |
-| Two-cluster collision | 32,768 | 18.96% | **4.61%** | 4.09x |
-| Two-cluster collision | 65,536 | 20.66% | **4.51%** | 13.35x |
-| Rotating disk (held out) | 32,768 | 16.43% | 22.25% | 1.27x |
-| Rotating disk (held out) | 65,536 | 17.78% | 25.28% | **0.86x** |
-
-The fine-tuned checkpoint is therefore retained as an experiment but is **not**
-the new default. It demonstrates that ordinary pooled loss can specialize the
-small radial network toward one high-error family even while aggregate
-validation loss improves. The next training change should use family-balanced
-loss or family-aware model selection and reject checkpoints that regress badly
-on any trained-family validation slice. The disk must remain held out for the
-final generalization test.
-
-Reproduce the paired evaluation while reusing the existing exact timings with:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\benchmark_crossover_matrix.py `
-    --device cuda `
-    --checkpoint results\ml_hierarchical_large_n\best_model.pt `
-    --output-dir results\crossover_matrix_large_trained `
-    --figure visualization\output\crossover_matrix_large_trained.png `
-    --exact-results-dir results\crossover_matrix
-```
-
-![Large-N fine-tuning crossover](visualization/output/crossover_matrix_large_trained.png)
-
-#### Family-balanced loss and guarded checkpoint selection
-
-The follow-up uses a snapshot-relative Huber loss. Each snapshot's prediction
-and target are divided by that snapshot's RMS target acceleration before the
-loss is computed, and snapshot losses are averaged equally. This prevents a
-high-force family from dominating solely because of its physical scale. The
-trainer also records per-family validation metrics and can reject any epoch
-that regresses too far from the initializer on a trained family.
-
-The selected guarded run used mean family relative L2 as its objective and a
-15% maximum family-regression threshold:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\train_hierarchical.py `
-    --initializer results\ml_hierarchical_geometry\best_model.pt `
-    --output-dir results\ml_hierarchical_balanced_guarded `
-    --figure visualization\output\ml_hierarchical_balanced_guarded_history.png `
-    --body-counts 512,1024,2048 --theta 0.7 `
-    --interaction-backend cuda --epochs 10 --learning-rate 2e-5 `
-    --minimum-learning-rate 1e-6 `
-    --loss-mode snapshot_relative_huber `
-    --checkpoint-selection mean_family_relative_l2 `
-    --maximum-family-regression 0.15 `
-    --max-snapshots 1 --max-particles 2048 `
-    --training-snapshots-per-case 8 `
-    --validation-snapshots-per-case 4 --device cuda
-```
-
-The guard selected epoch 3. Its validation mean-family relative L2 improved
-24.4%, and no trained family regressed more than 12%. Later epochs achieved a
-better mean but were correctly rejected because one family regressed by at
-least 36%. On the unchanged large-N matrix, the guarded model is a substantially
-better compromise than ordinary pooled fine-tuning:
-
-| Family | N | Original error | Pooled fine-tune | Balanced guarded | Guarded change |
-|---|---:|---:|---:|---:|---:|
-| Uniform cube | 32,768 | 1.91% | 7.27% | **1.82%** | -4% |
-| Uniform cube | 65,536 | 1.86% | 8.01% | 2.28% | +22% |
-| Plummer sphere | 32,768 | 14.81% | 15.73% | **10.18%** | -31% |
-| Plummer sphere | 65,536 | 15.44% | 16.63% | **10.86%** | -30% |
-| Two-cluster collision | 32,768 | 18.96% | 4.61% | **11.93%** | -37% |
-| Two-cluster collision | 65,536 | 20.66% | 4.51% | **12.30%** | -40% |
-| Rotating disk (held out) | 32,768 | **16.43%** | 22.25% | 18.20% | +11% |
-| Rotating disk (held out) | 65,536 | **17.78%** | 25.28% | 20.81% | +17% |
-
-The guarded checkpoint is the best trained-family compromise, but the original
-checkpoint remains the conservative default because it still transfers better
-to the completely held-out disk and the largest uniform case. The result also
-shows why the disk must not participate in checkpoint selection: using it would
-turn the final generalization test into validation data. The next model change
-should reduce this remaining distribution shift through stronger weight
-anchoring, richer aggregate-cell features, or a larger radial network, while
-continuing to select solely on trained-family validation slices.
-
-![Guarded balanced crossover](visualization/output/crossover_matrix_balanced_guarded.png)
-
-### Large-N opening-angle tradeoff
-
-The opening angle controls the algorithmic tradeoff independently of the
-learned weights. Smaller `theta` opens more tree cells and evaluates more exact
-near-field interactions; larger `theta` accepts more aggregate cells. The
-reusable sweep compares named checkpoints on identical states and pairs each
-measurement with the existing exact-CUDA timing:
-
-```powershell
-# Safe one-seed pilot across the useful range.
-.\.venv\Scripts\python.exe .\ml\benchmark_theta_sweep.py `
-    --device cuda --body-counts 32768 `
-    --theta 0.5,0.7,1.0 --seeds-per-case 1 `
-    --warmups 0 --repetitions 1
-
-# Full three-seed validation of the promising fast setting.
-.\.venv\Scripts\python.exe .\ml\benchmark_theta_sweep.py `
-    --device cuda --body-counts 32768,65536 `
-    --theta 1.0 --seeds-per-case 3 --warmups 1 --repetitions 5 `
-    --output-dir results\theta_sweep_full_theta1 `
-    --figure visualization\output\theta_sweep_full_theta1.png
-```
-
-The pilot eliminated `theta=0.5`: it retained 4%–15% of direct interactions
-and was 3x–48x slower than exact CUDA, yet structured-family error remained
-9%–16%. The full `theta=1.0` result is:
-
-| Model | Family | N | ML / exact time | Interactions retained | Relative L2 error |
-|---|---|---:|---:|---:|---:|
-| Original | Uniform cube | 32,768 | **0.50x** | 0.85% | **1.74%** |
-| Original | Uniform cube | 65,536 | **0.30x** | 0.47% | **1.69%** |
-| Guarded | Uniform cube | 32,768 | **0.48x** | 0.85% | 2.11% |
-| Guarded | Uniform cube | 65,536 | **0.28x** | 0.47% | 2.27% |
-| Guarded | Plummer sphere | 32,768 | 1.32x | 2.21% | 11.11% |
-| Guarded | Plummer sphere | 65,536 | **0.70x** | 1.13% | 11.38% |
-| Guarded | Two-cluster collision | 32,768 | 1.41x | 2.58% | 12.31% |
-| Guarded | Two-cluster collision | 65,536 | **0.66x** | 1.07% | 12.43% |
-| Guarded | Rotating disk | 32,768 | **0.58x** | 1.00% | 23.65% |
-| Guarded | Rotating disk | 65,536 | **0.34x** | 0.57% | 25.65% |
-
-At N=65536, `theta=1.0` produces a speed crossover for every family: roughly
-1.4x faster for Plummer, 1.5x for collision, 3.0x for disk, and 3.5x for the
-uniform cube. However, only the uniform cube combines the speedup with low
-force error. The scientifically defensible result is therefore: a broad
-**performance crossover** exists at large N, but a broad **accuracy-and-speed
-crossover** does not yet exist. `theta=0.7` remains the conservative project
-default; `theta=1.0` is the measured high-throughput configuration.
-
-![Opening-angle pilot sweep](visualization/output/theta_sweep.png)
-
-### Hierarchical rollout evaluation
-
-The geometry-aware model was inserted into velocity-Verlet at `theta=0.7` and run for 175 steps. The N=128 validation result averages all six trajectories:
-
-| Evaluation | Position RMSE | Velocity RMSE | Force RMSE | Relative energy drift | Momentum drift |
-|---|---:|---:|---:|---:|---:|
-| Validation N=128 | **1.96e-5** | **3.44e-4** | **3.99e-3** | **3.09e-5** | **8.44e-9** |
-| Held-out disk N=256 | **1.55e-4** | **1.80e-3** | **1.08e-2** | **2.98e-4** | **2.23e-8** |
-
-For comparison, the fully learned O(N²) pairwise rollout had N=128 position RMSE `4.47e-4`, force RMSE `3.58e-1`, and energy drift `1.62e-3`; its held-out-disk position RMSE was `5.67e-3`. Exact-near interactions make the hierarchical trajectory substantially more accurate, although it retains more interactions at `theta=0.7`.
-
-Target-specific tree acceptance does not guarantee equal-and-opposite approximated forces, so the model applies an O(N) zero-net-force projection after every hierarchical prediction:
-
-```text
-a_corrected_i = a_i - sum_j(m_j * a_j) / sum_j(m_j)
-```
-
-The same acceleration offset is removed from every body, so relative accelerations are unchanged; it removes only spurious center-of-mass acceleration. The interaction tree and interaction count are unchanged. This enforces global linear-momentum conservation, although it does not enforce pairwise action–reaction or angular-momentum conservation.
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\rollout_baseline.py `
-    --predictor hierarchical `
-    --checkpoint results\ml_hierarchical_geometry\best_model.pt `
-    --theta 0.7 `
-    --split validation --body-counts 128 --device cuda `
-    --output-dir results\rollout_hierarchical `
-    --figure-dir visualization\output\rollout_hierarchical
-```
-
-![Hierarchical rollout errors](visualization/output/rollout_hierarchical/rollout_errors.png)
-
-#### N=1024 and N=2048 rollout matrix
-
-The larger rollout matrix compares the original and guarded checkpoints at
-`theta=0.7` and `theta=1.0`. Every configuration is integrated for 175
-velocity-Verlet steps and compared against the same saved exact tiled-CUDA
-trajectory checkpoints. The final results average both available validation
-trajectories for every trained family/count and all four held-out disk
-trajectories per count:
-
-```powershell
-.\.venv\Scripts\python.exe .\ml\run_rollout_matrix.py `
-    --device cuda --body-counts 1024,2048 `
-    --max-trajectories-per-family 4 --overwrite
-```
-
-The guarded checkpoint at the conservative angle gives the following N=2048
-averages; the high-throughput column uses the same guarded weights at
-`theta=1.0`:
-
-| Family | Guarded 0.7 position RMSE | Guarded 0.7 energy drift | Guarded 0.7 time | Guarded 1.0 position RMSE | Guarded 1.0 time |
-|---|---:|---:|---:|---:|---:|
-| Uniform cube | **2.89e-5** | 4.80e-5 | 1,565 ms | 6.13e-5 | **880 ms** |
-| Plummer sphere | **1.01e-4** | 8.84e-5 | 3,635 ms | 1.86e-4 | **2,903 ms** |
-| Two-cluster collision | **2.64e-5** | 7.34e-4 | 3,110 ms | 3.90e-5 | **2,533 ms** |
-| Rotating disk (held out) | **9.98e-4** | 6.69e-4 | 1,882 ms | 1.66e-3 | **1,211 ms** |
-
-At N=2048, changing the guarded model from `theta=0.7` to `theta=1.0`
-reduced the measured 175-step ML simulation time by about 18% for collision,
-20% for Plummer, 36% for disk, and 44% for uniform. Final position error rose
-by approximately 48%, 84%, 67%, and 112%, respectively. All configurations
-remained finite over the short horizon; the worst mean relative energy drift
-was about 0.20%, and momentum drift remained around `1e-8` or lower.
-
-The guarded `theta=0.7` model roughly halved Plummer position error relative to
-the original `theta=0.7` model at both sizes. It also reduced held-out disk
-position error by about 33% at N=1024 and 18% at N=2048. It did not dominate
-every metric: the original model retained lower collision energy drift, and
-some uniform/collision differences changed with N. The correct conclusion is
-therefore that guarded `theta=0.7` is the strongest accuracy-oriented candidate,
-while guarded `theta=1.0` is a faster but less accurate operating point—not a
-universally better model.
-
-The reference checkpoints provide exact-CUDA positions, velocities, and forces
-for error measurement. The times above measure only the ML rollout integration
-on this machine; they are not a fresh exact-CUDA simulation-time comparison.
-Detailed time-series, per-trajectory final values, and force timings are stored
-under `results/rollout_matrix/`.
-
-![Large rollout configuration matrix](visualization/output/rollout_matrix.png)
-
-### Dataset validation status
-
-The tracked experiment matrix now records:
-
-```text
-status: serial_sample_validated
-snapshots_checked: 84
-maximum_scaled_error: 1.729e-15
-```
-
-The sample includes the first and last saved state from one trajectory for every
-shard family and particle count. It covers all splits and evaluation groups,
-including N=3072 extrapolation and the held-out rotating disk. Naïve/tiled CUDA
-agreement is still retained as a generation check, while this serial comparison
-provides the independent FP64 reference. Generated raw/processed metadata may
-continue to say `pre_serial_validation` until those local artifacts are
-regenerated; the versioned validation CSV is the authoritative audit record.
-
-## Repository layout
-
-```text
-.
-├── CMakeLists.txt
-├── setup_ml_extension.py      builds the optional native ML backend
-├── include/nbody/              C++ data structures and public APIs
-├── src/
-│   ├── cuda/                   naïve and tiled CUDA implementations
-│   ├── generate_dataset.cpp    CUDA acceleration-label writer
-│   ├── serial.cpp              independent exact FP64 CPU backend
-│   ├── openmp.cpp              shared-memory exact FP64 CPU backend
-│   ├── benchmark_force.cpp     paired CPU/naïve-CUDA/tiled-CUDA force timing
-│   ├── validate_dataset.cpp    serial audit of saved CUDA labels
-│   ├── initial_conditions.cpp  four deterministic system families
-│   └── main.cpp                simulation and benchmark executable
-├── tests/                      initialization and CUDA correctness tests
-├── scripts/
-│   ├── run_cuda_benchmarks.ps1
-│   ├── run_cuda_block_sweep.ps1
-│   ├── run_cpu_force_sweep.ps1
-│   ├── validate_cpu_labels.ps1
-│   ├── plot_cpu_crossover.py   final paired CPU/CUDA summary and figure
-│   ├── plot_results.py
-│   ├── plot_block_sweep.py
-│   └── *.slurm                 cluster job templates
-├── ml/
-│   ├── dataset_matrix.json     fixed candidate experiment matrix
-│   ├── generate_full_dataset.py
-│   ├── prepare_full_dataset.py
-│   ├── analyze_dataset.py      EDA and physical sanity checks
-│   ├── torch_dataset.py        PyTorch tensors and variable-N batching
-│   ├── baseline_model.py       O(N²) equivariant accuracy baseline
-│   ├── train_baseline.py       training and checkpoint selection
-│   ├── evaluate_baseline.py    per-family/count evaluation
-│   ├── rollout.py              integration and physical diagnostics
-│   ├── rollout_baseline.py     exact/learned trajectory evaluation
-│   ├── run_rollout_matrix.py   multi-model/angle rollout comparison
-│   ├── hierarchical_model.py   octree exact-near/learned-far prototype
-│   ├── train_hierarchical.py   aggregate-cell far-field fine-tuning
-│   ├── evaluate_hierarchical.py accuracy-versus-work sweep
-│   ├── benchmark_hierarchical.py end-to-end sparse-force timing
-│   ├── benchmark_large_n.py    paired large-N crossover experiment
-│   ├── benchmark_crossover_matrix.py multi-family/seed validation
-│   ├── benchmark_theta_sweep.py opening-angle accuracy/speed sweep
-│   ├── cpp/                    compiled parallel interaction builder
-│   └── dataset.py              Parquet snapshot loader
-├── results/                    versioned summaries and selected raw benchmark CSVs
-├── visualization/output/       versioned CUDA, CPU-crossover, dataset, and ML figures
-└── data/                       generated locally and ignored by Git
-```
-
-## Known limitations and next steps
-
-1. Record the completed CPU-CUDA crossover result in the final project report.
-2. Decide whether naïve CUDA belongs in an additional paired matrix or remains covered by the existing CUDA scaling study.
-3. Repeat the paired experiment on CARC or another CPU/GPU combination to measure how hardware changes the crossover point.
-4. Test stronger initializer-weight anchoring, richer aggregate-cell features, or a larger radial network only if additional ML development is in scope.
-5. Redesign CUDA traversal for deep, irregular trees to reduce branch divergence in concentrated systems.
-6. Extend the completed 175-step N=1024/2048 rollout matrix to longer horizons and, if memory permits, larger N to test delayed instability.
-7. Fuse or streamline CUDA traversal and learned-force evaluation so the variable interaction list does not need to be materialized and reread by separate kernels.
-8. Define an explicit acceptable force/trajectory error threshold before choosing a final checkpoint and opening angle.
-
-Any ML speedup claim must include graph construction, preprocessing, transfers, and inference. Kernel-only ML timing must not be compared with end-to-end exact-solver timing.
+1. **OpenMP is best for small local problems; tiled CUDA wins after roughly
+   1,000–2,000 bodies on this machine.**
+2. **The hierarchical ML method successfully removes force calculations**, and
+   the fraction of removed work improves as the simulation grows.
+3. **ML can beat exact CUDA at large N**, but the result depends strongly on the
+   particle distribution and opening angle.
+4. **Speed alone is not enough.** The fastest configuration can have
+   unacceptable force and trajectory error.
+5. The current result is a **measured performance–accuracy tradeoff**, not a
+   universal replacement for exact N-body simulation.
+
+## Verification
+
+- All **5/5 C++ and CUDA tests** pass.
+- All **29/29 Python and ML tests** pass.
+- A stratified sample of **84 CUDA-generated force labels** passed independent
+  serial FP64 validation. The maximum scaled difference was `1.73e-15`.
+
+The reported timings were measured on an NVIDIA GeForce RTX 3060 Laptop GPU
+with CUDA 12.8. Crossover points are hardware-specific and should be remeasured
+on other systems.
+
+## More information
+
+See [project_overview.md](project_overview.md) for installation, build and test
+instructions, dataset generation, complete experiment tables, reproduction
+commands, repository layout, and limitations.
