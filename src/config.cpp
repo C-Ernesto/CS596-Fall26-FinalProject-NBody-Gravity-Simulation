@@ -1,5 +1,6 @@
 #include "nbody/config.hpp"
 
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -65,8 +66,18 @@ Config parse_arguments(int argc, char** argv) {
     }
 
     if (config.bodies == 0) throw std::invalid_argument("--bodies must be positive");
-    if (config.dt <= 0.0) throw std::invalid_argument("--dt must be positive");
-    if (config.epsilon < 0.0) throw std::invalid_argument("--epsilon cannot be negative");
+    if (!std::isfinite(config.dt) || config.dt <= 0.0) {
+        throw std::invalid_argument("--dt must be finite and positive");
+    }
+    if (!std::isfinite(config.epsilon) || config.epsilon < 0.0) {
+        throw std::invalid_argument("--epsilon must be finite and nonnegative");
+    }
+    if (config.threads < 0) {
+        throw std::invalid_argument("--threads cannot be negative");
+    }
+    if (config.block_size <= 0) {
+        throw std::invalid_argument("--block-size must be positive");
+    }
     return config;
 }
 

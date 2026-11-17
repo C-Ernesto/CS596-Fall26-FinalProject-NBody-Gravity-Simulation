@@ -9,6 +9,7 @@
 
 #include "cpu_detail.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -57,12 +58,17 @@ int openmp_thread_count(int requested_threads) {
     if (requested_threads < 0) {
         throw std::invalid_argument("thread count cannot be negative");
     }
-    if (requested_threads > 0) {
-        return requested_threads;
-    }
 #ifdef _OPENMP
-    // 0 means "use the OpenMP default" (OMP_NUM_THREADS or all hardware threads)
-    return omp_get_max_threads();
+    const int requested = requested_threads > 0
+        ? requested_threads
+        : omp_get_max_threads();
+    int actual = 1;
+#pragma omp parallel num_threads(requested)
+    {
+#pragma omp single
+        actual = omp_get_num_threads();
+    }
+    return actual;
 #else
     return 1;
 #endif
@@ -73,8 +79,8 @@ Accelerations compute_acceleration_openmp(
     double epsilon,
     int threads
 ) {
-    if (epsilon < 0.0) {
-        throw std::invalid_argument("epsilon cannot be negative");
+    if (!std::isfinite(epsilon) || epsilon < 0.0) {
+        throw std::invalid_argument("epsilon must be finite and nonnegative");
     }
 
     const int thread_count = openmp_thread_count(threads);

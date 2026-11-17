@@ -22,6 +22,17 @@ Parquet:
 .\.venv\Scripts\python.exe .\ml\prepare_full_dataset.py
 ```
 
+The independent serial FP64 audit is reproducible with:
+
+```powershell
+.\scripts\validate_cpu_labels.ps1 -Overwrite
+```
+
+It checks the first and last saved snapshots from one trajectory for every
+family/count combination in every shard. All 84 selected snapshots passed the
+`1e-10` scaled tolerance; the maximum scaled difference was `1.73e-15`.
+Results are stored in `results/cpu_label_validation.csv`.
+
 `prepare_full_dataset.py` checks every snapshot, writes a snapshot index, and
 fits normalization statistics using only the training split. Use
 `SnapshotDataset` from `ml/dataset.py` to retrieve complete variable-size
@@ -230,14 +241,15 @@ The model always subtracts mass-weighted mean acceleration, which enforces zero
 total internal force without changing relative accelerations or interaction count.
 
 This is intentionally named a **candidate** full dataset. Its labels are FP64
-tiled CUDA results sampled against naïve FP64 CUDA, but the metadata remains
-`pre_serial_validation` and `serial_validated: false`. When the independent CPU
-solver is added, a representative subset must be compared against it before
-the dataset is frozen for final experiments.
+tiled CUDA results sampled against naïve FP64 CUDA. The independent serial FP64
+audit now covers 84 stratified snapshots and passed with a maximum scaled error
+of `1.73e-15`. Locally generated metadata can retain its original
+`pre_serial_validation` value until those artifacts are regenerated; the
+tracked matrix and `results/cpu_label_validation.csv` record the completed
+audit.
 
 Before freezing the final dataset:
 
-1. validate a representative CUDA label sample against the independent serial
-   implementation;
-2. review the matrix size and physical parameter ranges;
+1. review the matrix size and physical parameter ranges;
+2. decide whether the audited candidate is frozen without regeneration;
 3. record the final code commit, compiler, CUDA, and GPU metadata.

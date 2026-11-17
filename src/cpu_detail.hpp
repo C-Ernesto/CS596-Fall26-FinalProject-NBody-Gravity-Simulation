@@ -61,11 +61,11 @@ inline Acceleration acceleration_on(
 }
 
 inline void validate_simulation_arguments(double dt, double epsilon) {
-    if (dt <= 0.0) {
-        throw std::invalid_argument("dt must be positive");
+    if (!std::isfinite(dt) || dt <= 0.0) {
+        throw std::invalid_argument("dt must be finite and positive");
     }
-    if (epsilon < 0.0) {
-        throw std::invalid_argument("epsilon cannot be negative");
+    if (!std::isfinite(epsilon) || epsilon < 0.0) {
+        throw std::invalid_argument("epsilon must be finite and nonnegative");
     }
 }
 
@@ -87,12 +87,11 @@ Bodies simulate_velocity_verlet(
     double epsilon,
     ComputeForces&& compute_forces
 ) {
+    validate_simulation_arguments(dt, epsilon);
     Bodies bodies = initial_bodies;
     if (bodies.empty() || steps == 0) {
         return bodies;
     }
-
-    validate_simulation_arguments(dt, epsilon);
 
     Accelerations accelerations(bodies.size());
     compute_forces(bodies, accelerations);

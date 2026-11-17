@@ -6,6 +6,7 @@
 
 #include "cpu_detail.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <stdexcept>
 
@@ -29,8 +30,8 @@ void compute_serial_into(
 }  // namespace
 
 Accelerations compute_acceleration_serial(const Bodies& bodies, double epsilon) {
-    if (epsilon < 0.0) {
-        throw std::invalid_argument("epsilon cannot be negative");
+    if (!std::isfinite(epsilon) || epsilon < 0.0) {
+        throw std::invalid_argument("epsilon must be finite and nonnegative");
     }
 
     Accelerations accelerations(bodies.size());

@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -230,6 +231,27 @@ void test_simulation_edge_cases() {
         threw = true;
     }
     check(threw, "non-positive dt is rejected");
+
+    threw = false;
+    try {
+        (void)nbody::simulate_serial(
+            initial,
+            0,
+            std::numeric_limits<double>::quiet_NaN(),
+            0.01);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    check(threw, "non-finite dt is rejected even for zero steps");
+
+    threw = false;
+    try {
+        (void)nbody::compute_acceleration_serial(
+            initial, std::numeric_limits<double>::infinity());
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    check(threw, "non-finite epsilon is rejected");
 }
 
 #ifdef NBODY_HAS_OPENMP
@@ -251,7 +273,9 @@ void test_openmp_matches_serial() {
     check(bitwise_equal(openmp_final, serial_final),
           "20-step trajectory bitwise equal to serial");
 
-    check(nbody::openmp_thread_count(3) == 3, "explicit thread count is honored");
+    const int actual_threads = nbody::openmp_thread_count(3);
+    check(actual_threads >= 1 && actual_threads <= 3,
+          "reported OpenMP thread count is the observed team size");
     check(nbody::openmp_thread_count(0) >= 1, "default thread count is positive");
 
     bool threw = false;

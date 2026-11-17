@@ -1,6 +1,13 @@
 {
   "dataset_name": "nbody_force_candidate_v1",
-  "status": "pre_serial_validation",
+  "status": "serial_sample_validated",
+  "serial_validation": {
+    "scope": "first and last saved snapshots from one trajectory per shard family and particle count",
+    "snapshots_checked": 84,
+    "tolerance": 1e-10,
+    "maximum_scaled_error": 1.7291462095938698e-15,
+    "results": "results/cpu_label_validation.csv"
+  },
   "global": {
     "snapshots": 8,
     "stride": 25,
