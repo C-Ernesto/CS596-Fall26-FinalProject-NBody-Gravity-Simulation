@@ -33,6 +33,9 @@ CMakeUserPresets.json
 !/results/cuda_block_sweep_refined.csv
 !/results/cuda_block_sweep_refined_summary.csv
 !/results/cuda_block_sweep_refined_best.csv
+!/results/cpu_force_sweep.csv
+!/results/cpu_cuda_crossover.csv
+!/results/cpu_label_validation.csv
 !/results/dataset_analysis/
 !/results/dataset_analysis/*.csv
 !/results/dataset_analysis/report.md

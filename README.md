@@ -2,7 +2,7 @@
 
 This project studies the performance of gravitational N-body simulation on CPUs and GPUs and asks whether a machine-learning surrogate can reduce the work of the expensive all-pairs force calculation while retaining useful accuracy. The exact direct method requires every body to interact with every other body, so one force evaluation is O(N²). The project currently has working naïve and shared-memory-tiled CUDA implementations, a velocity-Verlet integrator, performance analysis tools, four initial-condition families, a complete candidate ML dataset pipeline, and an octree-based exact-near/learned-far force prototype.
 
-The serial CPU and OpenMP CPU implementations remain to be added. The hierarchical ML prototype has now been trained, evaluated across unseen counts and a held-out family, tested in 175-step rollouts, and accelerated with compiled CPU and CUDA interaction builders. Until an independent serial FP64 implementation validates a representative sample of the generated labels, the dataset is deliberately described as a **candidate dataset**, not a frozen final dataset.
+Exact FP64 serial and OpenMP CPU backends are implemented and tested, including direct comparisons with both CUDA kernels and a tiled-CUDA trajectory. A stratified sample of 84 generated label snapshots has also passed independent serial validation. The completed CPU thread sweep selected 16 OpenMP threads, and the final paired force benchmark measured the local OpenMP-to-tiled-CUDA crossover between 1,024 and 2,048 bodies overall. The hierarchical ML prototype has been trained, evaluated across unseen counts and a held-out family, and tested in 175-step rollouts.
 
 ## Research questions
 
@@ -32,13 +32,13 @@ The ML model must reduce the number of interactions. A neural network applied to
 | Candidate ML dataset generation and loading | Implemented; dataset generated locally |
 | PyTorch tensor, batching, and DataLoader pipeline | Implemented and tested |
 | Small-N fully connected force baseline | Implemented, trained, and evaluated |
-| Serial CPU force calculation | Not implemented yet |
-| OpenMP force calculation | Not implemented yet |
-| CPU/GPU crossover analysis | Waiting for serial/OpenMP implementations |
+| Serial CPU force calculation and velocity-Verlet | Implemented and analytically tested |
+| OpenMP force calculation and velocity-Verlet | Implemented; bitwise agreement with serial tested |
+| CPU/GPU crossover analysis | Completed locally; overall OpenMP-to-tiled-CUDA crossover measured between N=1,024 and N=2,048 |
 | Hierarchical exact-near/learned-far model | Geometry features, training, generalization tests, and rollouts implemented |
 | Compiled hierarchy and interaction builder | Implemented in C++ with parallel target traversal |
 | CUDA hierarchy traversal and interaction packing | Implemented and checked against the CPU builder |
-| CUDA labels validated against independent CPU FP64 | Waiting for serial implementation |
+| CUDA labels validated against independent CPU FP64 | 84-snapshot stratified sample passed |
 
 ## Physical and numerical model
 
@@ -120,7 +120,7 @@ module load cmake
 module load python
 ```
 
-The files `scripts/run_cpu.slurm` and `scripts/run_gpu.slurm` are templates. Before submitting them, add the correct CARC account, partition/constraint, and module commands. The CPU job will not run a simulation until the serial/OpenMP backends are implemented.
+The files `scripts/run_cpu.slurm` and `scripts/run_gpu.slurm` are templates. Before submitting them, add the correct CARC account, partition/constraint, and module commands. The CPU template now runs an OpenMP force sweep; adjust body counts, thread counts, memory, and wall time for the selected CARC node.
 
 ## Get the code and Python environment
 
@@ -162,6 +162,8 @@ The executables are written to:
 ```text
 build-cuda-explicit/Release/nbody.exe
 build-cuda-explicit/Release/nbody_generate_dataset.exe
+build-cuda-explicit/Release/nbody_benchmark_force.exe
+build-cuda-explicit/Release/nbody_validate_dataset.exe
 ```
 
 ### Linux CUDA build
@@ -173,14 +175,17 @@ cmake --build build-cuda --parallel
 
 ### CPU-only build
 
-A CPU-only configuration can build the shared infrastructure and initialization tests:
+A CPU-only configuration builds the serial and OpenMP simulation backends,
+force benchmark, dataset validator, and CPU tests:
 
 ```powershell
 cmake -S . -B build
 cmake --build build --config Release
 ```
 
-The `serial` and `openmp` command-line choices currently report that CPU simulation is not implemented. A CPU-only build is therefore not yet a usable simulation backend.
+Use `--implementation serial` or `--implementation openmp --threads N` with
+the resulting `nbody` executable. CMake uses the available OpenMP runtime when
+found; an OpenMP request reports an error at runtime if the build lacks OpenMP.
 
 ## Run the tests
 
@@ -196,14 +201,15 @@ Linux:
 ctest --test-dir build-cuda --output-on-failure
 ```
 
-The current suite contains four CTest targets:
+The CUDA-enabled suite contains five CTest targets:
 
 - deterministic default initialization;
 - deterministic, finite, centered initial-condition families with unit total mass and zero net momentum;
+- serial analytical forces, velocity-Verlet conservation, OpenMP/serial bitwise agreement, and serial/CUDA agreement;
 - naïve CUDA analytical one- and two-body forces, a non-block-aligned 257-body case, velocity-Verlet motion, and timing validation;
 - tiled CUDA analytical and 257-body comparisons against naïve CUDA, including block sizes 64 and 256.
 
-At the time of this README update, all four tests pass.
+At the time of this README update, all five tests pass.
 
 ## Run a simulation
 
@@ -236,6 +242,137 @@ Append each repetition and its timing breakdown to a CSV file with `--output`:
 ```
 
 The detailed timing columns are allocation, host-to-device transfer, CUDA kernels, device-to-host transfer, cleanup, CUDA-wrapper total, and outer end-to-end time. Run `nbody.exe --help` for all options.
+
+## CPU backends and paired CPU-CUDA crossover
+
+Run the exact CPU simulations with the same command-line program:
+
+```powershell
+.\build-cuda-explicit\Release\nbody.exe `
+    --implementation serial --bodies 1024 --steps 10 --repetitions 5
+
+.\build-cuda-explicit\Release\nbody.exe `
+    --implementation openmp --bodies 1024 --steps 10 `
+    --threads 8 --repetitions 5
+```
+
+The force-only benchmark accepts `serial`, `openmp`, `cuda_naive`, and
+`cuda_tiled` in one
+paired measurement path. Every implementation receives the same generated
+states, seeds, softening, warmup, and repetitions. `total_ms` is the common
+wall-clock force-evaluation measurement; the CUDA-only columns retain the
+allocation, transfer, kernel, cleanup, and CUDA-wrapper breakdown:
+
+```powershell
+.\build-cuda-explicit\Release\nbody_benchmark_force.exe `
+    --implementations serial,openmp,cuda_naive,cuda_tiled `
+    --body-counts 256,512,1024 --trajectories-per-count 1 `
+    --repetitions 3 --threads 8 --initial-condition uniform_cube `
+    --output results\force_smoke.csv
+```
+
+Prepare a CPU-only serial/OpenMP scaling CSV with:
+
+```powershell
+.\scripts\run_cpu_force_sweep.ps1 `
+    -BodyCounts 256,512,1024,2048,4096,8192 `
+    -ThreadCounts 1,2,4,8,16 `
+    -TrajectoriesPerCount 3 -Repetitions 5 -Overwrite
+```
+
+The equivalent Bash and CARC templates are `scripts/run_benchmarks.sh` and
+`scripts/run_cpu.slurm`. The completed local CPU sweep covered four
+initial-condition families, three seeds per body count, five repetitions, and
+thread counts 1, 2, 4, 8, and 16. Sixteen threads won 11 of the 12 large-N
+family/count cases from N=2,048 through N=8,192, so it was selected for the
+final paired comparison. The raw thread-selection measurements are stored in
+`results/cpu_force_sweep.csv`.
+
+### Final paired crossover experiment
+
+The final benchmark compares serial CPU, 16-thread OpenMP, and tiled CUDA on
+the exact same generated body states. It used:
+
+- `N = 256, 512, 1024, 2048, 4096, 8192, 16384`;
+- uniform cube, Plummer sphere, two-cluster collision, and rotating disk;
+- three deterministic seeds per family and body count;
+- one untimed warmup and five measured repetitions per case;
+- FP64 forces with `epsilon = 0.01`;
+- 16 OpenMP threads and CUDA block size 64; and
+- common wall-clock force-evaluation time (`total_ms`) as the comparison.
+
+Reproduce the complete Windows experiment from the repository root with:
+
+```powershell
+$executable = ".\build-cuda-explicit\Release\nbody_benchmark_force.exe"
+$output = ".\results\cpu_cuda_crossover.csv"
+$families = @(
+    "uniform_cube",
+    "plummer_sphere",
+    "two_cluster_collision",
+    "rotating_disk"
+)
+
+$append = $false
+for ($familyIndex = 0; $familyIndex -lt $families.Count; $familyIndex++) {
+    $family = $families[$familyIndex]
+    $baseSeed = 900000 + 100000 * $familyIndex
+    $benchmarkArgs = @(
+        "--implementations", "serial,openmp,cuda_tiled",
+        "--body-counts", "256,512,1024,2048,4096,8192,16384",
+        "--base-seed", $baseSeed,
+        "--trajectories-per-count", 3,
+        "--repetitions", 5,
+        "--threads", 16,
+        "--block-size", 64,
+        "--initial-condition", $family,
+        "--output", $output
+    )
+    if ($append) { $benchmarkArgs += "--append" }
+    & $executable @benchmarkArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Paired benchmark failed for $family"
+    }
+    $append = $true
+}
+```
+
+The run produced all 1,260 expected timing rows. The following values are the
+median `total_ms` across all families, seeds, and repetitions:
+
+| Bodies | Serial CPU (ms) | OpenMP, 16 threads (ms) | Tiled CUDA (ms) | Fastest |
+|---:|---:|---:|---:|---|
+| 256 | 0.351 | 0.140 | 0.950 | OpenMP |
+| 512 | 1.617 | 0.474 | 1.168 | OpenMP |
+| 1,024 | 6.423 | 1.007 | 1.454 | OpenMP |
+| 2,048 | 24.362 | 5.456 | 2.820 | Tiled CUDA |
+| 4,096 | 79.254 | 28.702 | 7.735 | Tiled CUDA |
+| 8,192 | 325.323 | 67.993 | 23.683 | Tiled CUDA |
+| 16,384 | 1,321.438 | 159.313 | 72.093 | Tiled CUDA |
+
+The aggregate OpenMP-to-CUDA crossover is therefore between N=1,024 and
+N=2,048 on the development machine. The first tested CUDA win varies by
+initial-condition family: N=1,024 for uniform cube, N=2,048 for the Plummer
+sphere and rotating disk, and N=4,096 for the two-cluster collision. At
+N=16,384, tiled CUDA is 2.21x faster than 16-thread OpenMP and 18.33x faster
+than serial CPU. This distribution dependence and the machine-specific nature
+of the result are why new hardware should rerun the paired matrix rather than
+reuse this crossover point. Raw measurements are stored in
+`results/cpu_cuda_crossover.csv`.
+
+Validate the saved tiled-CUDA dataset labels against independent serial FP64:
+
+```powershell
+.\scripts\validate_cpu_labels.ps1 -Overwrite
+```
+
+The default selection checks the first and last saved snapshots of one
+trajectory for every shard family and particle count. The completed validation
+covered 84 snapshots across train, validation, interpolation, extrapolation,
+and held-out-disk data. Every snapshot passed the `1e-10` scaled tolerance; the
+largest scaled difference was `1.73e-15` and the largest relative L2 difference
+was `4.74e-16`. Detailed results are versioned in
+`results/cpu_label_validation.csv`.
 
 ## CUDA performance experiments
 
@@ -1066,14 +1203,21 @@ under `results/rollout_matrix/`.
 
 ### Dataset validation status
 
-The current metadata says:
+The tracked experiment matrix now records:
 
 ```text
-status: pre_serial_validation
-serial_validated: false
+status: serial_sample_validated
+snapshots_checked: 84
+maximum_scaled_error: 1.729e-15
 ```
 
-Naïve and tiled CUDA agreement is useful but not fully independent because both implementations run on CUDA and share project data structures. Once the serial FP64 backend is available, a stratified sample covering all families, particle counts, and splits must be compared against it before the dataset is frozen for final ML experiments.
+The sample includes the first and last saved state from one trajectory for every
+shard family and particle count. It covers all splits and evaluation groups,
+including N=3072 extrapolation and the held-out rotating disk. Naïve/tiled CUDA
+agreement is still retained as a generation check, while this serial comparison
+provides the independent FP64 reference. Generated raw/processed metadata may
+continue to say `pre_serial_validation` until those local artifacts are
+regenerated; the versioned validation CSV is the authoritative audit record.
 
 ## Repository layout
 
@@ -1085,13 +1229,18 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 ├── src/
 │   ├── cuda/                   naïve and tiled CUDA implementations
 │   ├── generate_dataset.cpp    CUDA acceleration-label writer
-│   ├── benchmark_force.cpp     force-only tiled-CUDA timing executable
+│   ├── serial.cpp              independent exact FP64 CPU backend
+│   ├── openmp.cpp              shared-memory exact FP64 CPU backend
+│   ├── benchmark_force.cpp     paired CPU/naïve-CUDA/tiled-CUDA force timing
+│   ├── validate_dataset.cpp    serial audit of saved CUDA labels
 │   ├── initial_conditions.cpp  four deterministic system families
 │   └── main.cpp                simulation and benchmark executable
 ├── tests/                      initialization and CUDA correctness tests
 ├── scripts/
 │   ├── run_cuda_benchmarks.ps1
 │   ├── run_cuda_block_sweep.ps1
+│   ├── run_cpu_force_sweep.ps1
+│   ├── validate_cpu_labels.ps1
 │   ├── plot_results.py
 │   ├── plot_block_sweep.py
 │   └── *.slurm                 cluster job templates
@@ -1123,14 +1272,13 @@ Naïve and tiled CUDA agreement is useful but not fully independent because both
 
 ## Known limitations and next steps
 
-1. Implement and analytically test the serial FP64 force calculation and velocity-Verlet simulation.
-2. Implement OpenMP and measure scaling across thread counts.
-3. Compare serial, OpenMP, naïve CUDA, and tiled CUDA to find the CPU/GPU crossover point.
-4. Validate a representative sample of CUDA dataset labels against serial FP64 and freeze a versioned final dataset.
-5. Test stronger initializer-weight anchoring, richer aggregate-cell features, or a larger radial network to improve structured families without the remaining 11%–22% transfer regression on disk and the largest uniform case.
-6. Redesign CUDA traversal for deep, irregular trees to reduce branch divergence in concentrated systems.
-7. Extend the completed 175-step N=1024/2048 rollout matrix to longer horizons and, if memory permits, larger N to test delayed instability.
-8. Fuse or streamline CUDA traversal and learned-force evaluation so the variable interaction list does not need to be materialized and reread by separate kernels.
-9. Define an explicit acceptable force/trajectory error threshold before choosing a final checkpoint and opening angle.
+1. Add a final summary plot for `results/cpu_cuda_crossover.csv` and record the crossover result in the project report.
+2. Decide whether naïve CUDA belongs in an additional paired matrix or remains covered by the existing CUDA scaling study.
+3. Repeat the paired experiment on CARC or another CPU/GPU combination to measure how hardware changes the crossover point.
+4. Test stronger initializer-weight anchoring, richer aggregate-cell features, or a larger radial network only if additional ML development is in scope.
+5. Redesign CUDA traversal for deep, irregular trees to reduce branch divergence in concentrated systems.
+6. Extend the completed 175-step N=1024/2048 rollout matrix to longer horizons and, if memory permits, larger N to test delayed instability.
+7. Fuse or streamline CUDA traversal and learned-force evaluation so the variable interaction list does not need to be materialized and reread by separate kernels.
+8. Define an explicit acceptable force/trajectory error threshold before choosing a final checkpoint and opening angle.
 
 Any ML speedup claim must include graph construction, preprocessing, transfers, and inference. Kernel-only ML timing must not be compared with end-to-end exact-solver timing.
