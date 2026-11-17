@@ -136,7 +136,9 @@ If CMake reports `No CUDA toolset found`, first verify that `nvcc --version` wor
 
 ### Linux or a cluster such as CARC
 
-Load site-provided compiler, CUDA, CMake, and Python modules. Exact module names vary by cluster, so inspect the available versions first:
+CARC's Discovery cluster uses Slurm. Clone or transfer the repository on a
+login or transfer node, but run the benchmarks on allocated compute nodes.
+From the repository root, inspect the current compiler and CUDA modules first:
 
 ```bash
 module spider cuda
@@ -144,16 +146,124 @@ module spider cmake
 module spider gcc
 ```
 
-Then load a mutually compatible set, for example:
+The CARC scripts default to the following module combination documented by
+CARC at the time of this update:
 
 ```bash
-module load gcc
-module load cuda
-module load cmake
-module load python
+module purge
+module load gcc/13.3.0 cmake/3.29.4 cuda/12.6.3
 ```
 
-The files `scripts/run_cpu.slurm` and `scripts/run_gpu.slurm` are templates. Before submitting them, add the correct CARC account, partition/constraint, and module commands. The CPU template now runs an OpenMP force sweep; adjust body counts, thread counts, memory, and wall time for the selected CARC node.
+If CARC changes the available versions, override the defaults before calling
+`sbatch`:
+
+```bash
+export NBODY_GCC_MODULE=gcc/AVAILABLE_VERSION
+export NBODY_CMAKE_MODULE=cmake/AVAILABLE_VERSION
+export NBODY_CUDA_MODULE=cuda/AVAILABLE_VERSION
+```
+
+### CARC CPU sweep
+
+`scripts/run_cpu.slurm` configures a clean CPU-only Release build, runs the CPU
+tests, and benchmarks serial plus every requested OpenMP thread count across all
+four initial-condition families. It also records the Git commit, CPU details,
+modules, compiler, CMake version, and experiment settings in a metadata file.
+
+Check your account and available CPU node features with `myaccount` and
+`noderes -c`. Then submit, for example:
+
+```bash
+export NBODY_HARDWARE_LABEL=epyc64
+export NBODY_THREAD_COUNTS="1 2 4 8 16 32"
+
+sbatch --account=YOUR_CARC_ACCOUNT \
+    --partition=epyc-64 \
+    --cpus-per-task=32 \
+    --export=ALL \
+    scripts/run_cpu.slurm
+```
+
+Use `--constraint=FEATURE` when a particular CPU model is required. The largest
+value in `NBODY_THREAD_COUNTS` must not exceed `--cpus-per-task`. Optional CPU
+settings are:
+
+| Environment variable | Default |
+|---|---|
+| `NBODY_HARDWARE_LABEL` | `cpu` |
+| `NBODY_BODY_COUNTS` | `256,512,1024,2048,4096,8192` |
+| `NBODY_THREAD_COUNTS` | `1 2 4 8 16` |
+| `NBODY_TRAJECTORIES_PER_COUNT` | `3` |
+| `NBODY_REPETITIONS` | `5` |
+
+The job writes:
+
+```text
+results/carc/LABEL-JOBID-cpu-sweep.csv
+results/carc/LABEL-JOBID-metadata.txt
+```
+
+### CARC paired CPU-GPU crossover
+
+`scripts/run_gpu.slurm` requests one GPU, configures a clean CUDA Release build
+for the allocated GPU, runs all five C++/CUDA tests, and measures serial CPU,
+OpenMP CPU, and tiled CUDA on identical states. The default settings reproduce
+the local experiment: 16 OpenMP threads, CUDA block size 64, four families,
+three seeds per family/count, and five timed repetitions.
+
+CARC provides several GPU models, so request one explicitly and give each run a
+hardware label. For an A100 run:
+
+```bash
+export NBODY_HARDWARE_LABEL=a100
+export NBODY_THREADS=16
+export NBODY_BLOCK_SIZE=64
+
+sbatch --account=YOUR_CARC_ACCOUNT \
+    --partition=gpu \
+    --gpus-per-task=a100:1 \
+    --cpus-per-task=16 \
+    --export=ALL \
+    scripts/run_gpu.slurm
+```
+
+Repeat with `l40s`, `a40`, `v100`, or another GPU reported by `noderes -c -g`.
+The build defaults to `CMAKE_CUDA_ARCHITECTURES=native`, so each job compiles
+for its allocated GPU. Optional GPU settings are:
+
+| Environment variable | Default |
+|---|---|
+| `NBODY_HARDWARE_LABEL` | `gpu` |
+| `NBODY_BODY_COUNTS` | `256,512,1024,2048,4096,8192,16384` |
+| `NBODY_THREADS` | `16` |
+| `NBODY_BLOCK_SIZE` | `64` |
+| `NBODY_CUDA_ARCHITECTURES` | `native` |
+| `NBODY_TRAJECTORIES_PER_COUNT` | `3` |
+| `NBODY_REPETITIONS` | `5` |
+
+The paired job writes:
+
+```text
+results/carc/LABEL-JOBID-crossover.csv
+results/carc/LABEL-JOBID-metadata.txt
+```
+
+Monitor either job with `squeue --me`, inspect the completed allocation with
+`seff JOBID`, and read `slurm-JOBNAME-JOBID.out` for the build and test log.
+Keep each hardware run in a separate CSV. After copying the results back to the
+local machine, create a hardware-specific summary and figure with:
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\plot_cpu_crossover.py `
+    --input results\carc\a100-JOBID-crossover.csv `
+    --summary-output results\carc\a100-JOBID-summary.csv `
+    --figure-output visualization\output\carc-a100-crossover.png
+```
+
+For a direct reproduction, keep 16 threads and block size 64. For a second,
+hardware-tuned comparison, first use the CPU job to select the best thread
+count and separately sweep CUDA block sizes on each GPU. Report fixed and tuned
+results separately so hardware differences are not confused with tuning.
 
 ## Get the code and Python environment
 
