@@ -1,12 +1,12 @@
 # CUDA N-Body Simulation and Machine-Learned Force Approximation
 
-This project studies the performance of gravitational N-body simulation on CPUs and GPUs and asks whether a machine-learning surrogate can reduce the work of the expensive all-pairs force calculation while retaining useful accuracy. The exact direct method requires every body to interact with every other body, so one force evaluation is O(N²). The project currently has working naïve and shared-memory-tiled CUDA implementations, a velocity-Verlet integrator, performance analysis tools, four initial-condition families, a complete candidate ML dataset pipeline, and an octree-based exact-near/learned-far force prototype.
+This project studies the performance of gravitational N-body simulation on CPUs and GPUs and asks whether a machine-learning surrogate can reduce the work of the expensive all-pairs force calculation while retaining useful accuracy. The exact direct method requires every body to interact with every other body, so one force evaluation is O(N²). The project currently has working serial and OpenMP CPU solvers, naïve and shared-memory-tiled CUDA solvers, a velocity-Verlet integrator, four initial-condition families, a candidate ML dataset pipeline with independent label validation, and an octree-based exact-near/learned-far force prototype.
 
 Exact FP64 serial and OpenMP CPU backends are implemented and tested, including direct comparisons with both CUDA kernels and a tiled-CUDA trajectory. A stratified sample of 84 generated label snapshots has also passed independent serial validation. The completed CPU thread sweep selected 16 OpenMP threads, and the final paired force benchmark measured the local OpenMP-to-tiled-CUDA crossover between 1,024 and 2,048 bodies overall. The hierarchical ML prototype has been trained, evaluated across unseen counts and a held-out family, and tested in 175-step rollouts.
 
 ## Research questions
 
-The completed and planned work is organized around four questions:
+The work is organized around four questions:
 
 1. At what particle count does exact CUDA become faster than exact serial and OpenMP CPU implementations?
 2. How much does shared-memory tiling improve the CUDA force calculation?
@@ -14,6 +14,37 @@ The completed and planned work is organized around four questions:
 4. If the learned model is accurate enough, is its complete preprocessing and inference pipeline actually faster than exact CPU or CUDA force evaluation?
 
 The ML model must reduce the number of interactions. A neural network applied to every particle pair would remain O(N²) and would likely do more work than the analytical gravity equation.
+
+## Key findings
+
+- **Exact CPU versus GPU:** a sweep over 1, 2, 4, 8, and 16 OpenMP
+  threads selected 16 threads for the local CPU baseline. In the final paired
+  benchmark, 16-thread OpenMP was faster through N=1,024 and tiled CUDA was
+  faster from N=2,048 onward, placing the overall crossover between those two
+  tested sizes. At N=16,384, tiled CUDA was 2.21x faster than OpenMP and 18.33x
+  faster than serial CPU.
+- **The crossover depends on the system:** the first tested CUDA win occurred
+  at N=1,024 for the uniform cube, N=2,048 for the Plummer sphere and rotating
+  disk, and N=4,096 for the two-cluster collision. The reported crossover is
+  therefore a result for this hardware and workload, not a universal constant.
+- **CUDA optimization:** block size 64 was the best tested default. Shared-memory
+  tiling improved the earlier 10-step CUDA benchmark by about 1.29x–1.42x for
+  N=256 through N=2,048, while the advantage was small at larger tested sizes.
+- **Dataset correctness:** 84 saved CUDA-label snapshots were checked against
+  the independent serial FP64 solver. All passed the `1e-10` scaled tolerance;
+  the maximum scaled difference was `1.73e-15`.
+- **Machine-learned force approximation:** the hierarchical model reduces the
+  number of evaluated interactions as N grows and is faster than exact tiled
+  CUDA for some large, diffuse systems. The crossover is distribution-dependent:
+  concentrated systems retain more interactions and cause irregular CUDA tree
+  traversal. At the aggressive `theta=1.0` setting, all tested N=65,536 families
+  crossed in runtime, but only the uniform cube combined that speedup with low
+  force error. The project therefore demonstrates a performance–accuracy
+  tradeoff, not a universal replacement for the exact solver.
+- **Trajectory behavior:** exact-near interactions and the zero-net-force
+  correction make hierarchical 175-step rollouts substantially more accurate
+  than the fully learned O(N²) baseline. Errors remain largest for the held-out
+  rotating disk and increase when the opening angle is made more aggressive.
 
 ## Current status
 
@@ -29,16 +60,18 @@ The ML model must reduce the number of interactions. A neural network applied to
 | CUDA velocity-Verlet integration | Implemented and tested |
 | Detailed CUDA timing and benchmark CSV output | Implemented |
 | CUDA scaling and block-size analyses | Completed on the development machine |
-| Candidate ML dataset generation and loading | Implemented; dataset generated locally |
+| Candidate ML dataset generation and loading | Implemented; dataset generated locally and sampled labels independently validated |
 | PyTorch tensor, batching, and DataLoader pipeline | Implemented and tested |
 | Small-N fully connected force baseline | Implemented, trained, and evaluated |
 | Serial CPU force calculation and velocity-Verlet | Implemented and analytically tested |
 | OpenMP force calculation and velocity-Verlet | Implemented; bitwise agreement with serial tested |
 | CPU/GPU crossover analysis | Completed locally; overall OpenMP-to-tiled-CUDA crossover measured between N=1,024 and N=2,048 |
+| CPU/GPU crossover summary and figure | Generated, reproducible, and versioned |
 | Hierarchical exact-near/learned-far model | Geometry features, training, generalization tests, and rollouts implemented |
 | Compiled hierarchy and interaction builder | Implemented in C++ with parallel target traversal |
 | CUDA hierarchy traversal and interaction packing | Implemented and checked against the CPU builder |
 | CUDA labels validated against independent CPU FP64 | 84-snapshot stratified sample passed |
+| Final verification | CUDA Release build passed; 5/5 C++/CUDA tests and 29/29 Python tests passed |
 
 ## Physical and numerical model
 
@@ -210,6 +243,17 @@ The CUDA-enabled suite contains five CTest targets:
 - tiled CUDA analytical and 257-body comparisons against naïve CUDA, including block sizes 64 and 256.
 
 At the time of this README update, all five tests pass.
+
+Run the complete Python and ML unit-test suite with:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
+```
+
+The final local verification passed all 29 Python tests, including variable-N
+batching, CUDA transfers, hierarchical CPU/CUDA interaction agreement,
+rotation equivariance, rollout physics, opening-angle parsing, and guarded
+checkpoint-selection logic.
 
 ## Run a simulation
 
@@ -1249,6 +1293,7 @@ regenerated; the versioned validation CSV is the authoritative audit record.
 │   ├── run_cuda_block_sweep.ps1
 │   ├── run_cpu_force_sweep.ps1
 │   ├── validate_cpu_labels.ps1
+│   ├── plot_cpu_crossover.py   final paired CPU/CUDA summary and figure
 │   ├── plot_results.py
 │   ├── plot_block_sweep.py
 │   └── *.slurm                 cluster job templates
@@ -1273,8 +1318,8 @@ regenerated; the versioned validation CSV is the authoritative audit record.
 │   ├── benchmark_theta_sweep.py opening-angle accuracy/speed sweep
 │   ├── cpp/                    compiled parallel interaction builder
 │   └── dataset.py              Parquet snapshot loader
-├── results/                    selected versioned results; other output ignored
-├── visualization/output/       selected versioned plots; other output ignored
+├── results/                    versioned summaries and selected raw benchmark CSVs
+├── visualization/output/       versioned CUDA, CPU-crossover, dataset, and ML figures
 └── data/                       generated locally and ignored by Git
 ```
 
