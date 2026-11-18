@@ -37,6 +37,9 @@ CMakeUserPresets.json
 !/results/cpu_cuda_crossover.csv
 !/results/cpu_cuda_crossover_summary.csv
 !/results/cpu_label_validation.csv
+!/results/carc/
+!/results/carc/*.csv
+!/results/carc/*.txt
 !/results/dataset_analysis/
 !/results/dataset_analysis/*.csv
 !/results/dataset_analysis/report.md
@@ -125,6 +128,7 @@ CMakeUserPresets.json
 !/visualization/output/cuda_optimized_timing_breakdown.png
 !/visualization/output/cuda_block_sweep_refined.png
 !/visualization/output/cpu_cuda_crossover.png
+!/visualization/output/carc-*-crossover.png
 !/visualization/output/dataset_analysis/
 !/visualization/output/dataset_analysis/*.png
 !/visualization/output/ml_baseline_history.png

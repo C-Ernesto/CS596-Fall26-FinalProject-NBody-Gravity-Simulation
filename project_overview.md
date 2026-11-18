@@ -2,7 +2,7 @@
 
 This project studies the performance of gravitational N-body simulation on CPUs and GPUs and asks whether a machine-learning surrogate can reduce the work of the expensive all-pairs force calculation while retaining useful accuracy. The exact direct method requires every body to interact with every other body, so one force evaluation is O(N²). The project currently has working serial and OpenMP CPU solvers, naïve and shared-memory-tiled CUDA solvers, a velocity-Verlet integrator, four initial-condition families, a candidate ML dataset pipeline with independent label validation, and an octree-based exact-near/learned-far force prototype.
 
-Exact FP64 serial and OpenMP CPU backends are implemented and tested, including direct comparisons with both CUDA kernels and a tiled-CUDA trajectory. A stratified sample of 84 generated label snapshots has also passed independent serial validation. The completed CPU thread sweep selected 16 OpenMP threads, and the final paired force benchmark measured the local OpenMP-to-tiled-CUDA crossover between 1,024 and 2,048 bodies overall. The hierarchical ML prototype has been trained, evaluated across unseen counts and a held-out family, and tested in 175-step rollouts.
+Exact FP64 serial and OpenMP CPU backends are implemented and tested, including direct comparisons with both CUDA kernels and a tiled-CUDA trajectory. A stratified sample of 84 generated label snapshots has also passed independent serial validation. The completed CPU thread sweep selected 16 OpenMP threads, and the final paired force benchmark measured the local OpenMP-to-tiled-CUDA crossover between 1,024 and 2,048 bodies overall. Repeating the paired benchmark on USC CARC with an NVIDIA A40 and AMD EPYC 7282 moved the measured crossover to between 2,048 and 4,096 bodies. The hierarchical ML prototype has been trained, evaluated across unseen counts and a held-out family, and tested in 175-step rollouts.
 
 ## Research questions
 
@@ -27,6 +27,11 @@ The ML model must reduce the number of interactions. A neural network applied to
   at N=1,024 for the uniform cube, N=2,048 for the Plummer sphere and rotating
   disk, and N=4,096 for the two-cluster collision. The reported crossover is
   therefore a result for this hardware and workload, not a universal constant.
+- **CARC hardware validation:** the same paired matrix was run on an NVIDIA A40
+  with an AMD EPYC 7282 CPU. Sixteen-thread OpenMP won through N=2,048 and
+  tiled CUDA won from N=4,096 onward for every family. At N=16,384, CUDA was
+  2.56x faster than OpenMP and 41.16x faster than serial. The shifted crossover
+  confirms that the threshold is hardware-dependent.
 - **CUDA optimization:** block size 64 was the best tested default. Shared-memory
   tiling improved the earlier 10-step CUDA benchmark by about 1.29x–1.42x for
   N=256 through N=2,048, while the advantage was small at larger tested sizes.
@@ -65,8 +70,8 @@ The ML model must reduce the number of interactions. A neural network applied to
 | Small-N fully connected force baseline | Implemented, trained, and evaluated |
 | Serial CPU force calculation and velocity-Verlet | Implemented and analytically tested |
 | OpenMP force calculation and velocity-Verlet | Implemented; bitwise agreement with serial tested |
-| CPU/GPU crossover analysis | Completed locally; overall OpenMP-to-tiled-CUDA crossover measured between N=1,024 and N=2,048 |
-| CPU/GPU crossover summary and figure | Generated, reproducible, and versioned |
+| CPU/GPU crossover analysis | Completed locally and on CARC; crossover measured at N=1,024–2,048 locally and N=2,048–4,096 on the A40 node |
+| CPU/GPU crossover summaries and figures | Local and CARC raw data, summaries, metadata, and figures generated, reproducible, and versioned |
 | Hierarchical exact-near/learned-far model | Geometry features, training, generalization tests, and rollouts implemented |
 | Compiled hierarchy and interaction builder | Implemented in C++ with parallel target traversal |
 | CUDA hierarchy traversal and interaction packing | Implemented and checked against the CPU builder |
@@ -212,16 +217,16 @@ the local experiment: 16 OpenMP threads, CUDA block size 64, four families,
 three seeds per family/count, and five timed repetitions.
 
 CARC provides several GPU models, so request one explicitly and give each run a
-hardware label. For an A100 run:
+hardware label. For an A40 run matching the completed CARC experiment:
 
 ```bash
-export NBODY_HARDWARE_LABEL=a100
+export NBODY_HARDWARE_LABEL=a40
 export NBODY_THREADS=16
 export NBODY_BLOCK_SIZE=64
 
 sbatch --account=YOUR_CARC_ACCOUNT \
     --partition=gpu \
-    --gpus-per-task=a100:1 \
+    --gpus-per-task=a40:1 \
     --cpus-per-task=16 \
     --export=ALL \
     scripts/run_gpu.slurm
@@ -255,10 +260,42 @@ local machine, create a hardware-specific summary and figure with:
 
 ```powershell
 .\.venv\Scripts\python.exe .\scripts\plot_cpu_crossover.py `
-    --input results\carc\a100-JOBID-crossover.csv `
-    --summary-output results\carc\a100-JOBID-summary.csv `
-    --figure-output visualization\output\carc-a100-crossover.png
+    --input results\carc\a40-JOBID-crossover.csv `
+    --summary-output results\carc\a40-JOBID-summary.csv `
+    --figure-output visualization\output\carc-a40-crossover.png
 ```
+
+### Completed CARC A40 result
+
+Job `14317037` repeated the full paired matrix on an NVIDIA A40 and an AMD EPYC
+7282 CPU using CUDA 12.6.3, GCC 13.3.0, 16 OpenMP threads, and CUDA block size
+64. It produced 1,260 timing rows across four initial-condition families,
+three seeds per family/count, and five repetitions.
+
+| Bodies | Serial CPU (ms) | OpenMP, 16 threads (ms) | Tiled CUDA (ms) | Fastest |
+|---:|---:|---:|---:|---|
+| 256 | 0.350 | 0.043 | 0.387 | OpenMP |
+| 512 | 1.407 | 0.120 | 0.581 | OpenMP |
+| 1,024 | 5.643 | 0.381 | 0.969 | OpenMP |
+| 2,048 | 22.715 | 1.448 | 1.745 | OpenMP |
+| 4,096 | 90.795 | 5.661 | 3.305 | Tiled CUDA |
+| 8,192 | 363.379 | 22.720 | 9.058 | Tiled CUDA |
+| 16,384 | 1,452.204 | 90.427 | 35.282 | Tiled CUDA |
+
+![CARC A40 paired CPU-CUDA crossover](visualization/output/carc-a40-crossover.png)
+
+The aggregate OpenMP-to-CUDA crossover is between N=2,048 and N=4,096. The
+first tested CUDA win is N=4,096 for every family. At N=16,384, tiled CUDA is
+2.56x faster than OpenMP and 41.16x faster than serial CPU. Compared with the
+local 1,024–2,048 crossover, this result directly demonstrates that the
+crossover depends on the CPU/GPU combination.
+
+The versioned artifacts are:
+
+- `results/carc/a40-14317037-crossover.csv` — all raw paired measurements;
+- `results/carc/a40-14317037-summary.csv` — aggregate medians and quartiles;
+- `results/carc/a40-14317037-metadata.txt` — node, tools, modules, and settings;
+- `visualization/output/carc-a40-crossover.png` — presentation figure.
 
 For a direct reproduction, keep 16 threads and block size 64. For a second,
 hardware-tuned comparison, first use the CPU job to select the best thread
@@ -521,6 +558,12 @@ than serial CPU. This distribution dependence and the machine-specific nature
 of the result are why new hardware should rerun the paired matrix rather than
 reuse this crossover point. Raw measurements are stored in
 `results/cpu_cuda_crossover.csv`.
+
+The matching CARC A40 experiment is documented in the CARC section above and
+stored in `results/carc/a40-14317037-crossover.csv`. It moved the crossover to
+between N=2,048 and N=4,096, reinforcing that the crossover must be measured
+for each hardware pairing rather than treated as a fixed property of the
+algorithm.
 
 Validate the saved tiled-CUDA dataset labels against independent serial FP64:
 

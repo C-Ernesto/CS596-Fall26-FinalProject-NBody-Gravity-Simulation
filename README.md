@@ -51,7 +51,7 @@ while distant groups are replaced by a learned center-of-mass interaction. The
 opening angle `theta` controls the tradeoff: a larger value removes more work
 but usually increases error.
 
-## Finding 1: the CPU-GPU crossover occurs at a few thousand bodies
+## Finding 1: the CPU-GPU crossover depends on the hardware
 
 A CPU sweep selected **16 OpenMP threads** as the best local CPU configuration.
 The final paired benchmark used identical states, three seeds per family, five
@@ -66,13 +66,33 @@ timed repetitions, CUDA block size 64, and body counts from 256 to 16,384.
 
 ![Paired exact-force CPU-CUDA crossover](visualization/output/cpu_cuda_crossover.png)
 
-**Result:** the overall OpenMP-to-CUDA crossover is between **N=1,024 and
+**Local result:** the overall OpenMP-to-CUDA crossover is between **N=1,024 and
 N=2,048** on the development laptop. At N=16,384, tiled CUDA is **2.21x faster
 than OpenMP** and **18.33x faster than serial CPU**.
 
 The crossover is also system-dependent. The first tested CUDA win occurs at
 N=1,024 for the uniform cube, N=2,048 for the Plummer sphere and rotating disk,
 and N=4,096 for the two-cluster collision.
+
+The same paired experiment was repeated on USC CARC using an **NVIDIA A40** and
+an **AMD EPYC 7282** CPU. The CARC run used the same four families, seeds,
+repetitions, 16 OpenMP threads, and CUDA block size 64.
+
+| Bodies | Serial CPU | OpenMP CPU | Tiled CUDA | Fastest |
+|---:|---:|---:|---:|---|
+| 256 | 0.350 ms | **0.043 ms** | 0.387 ms | OpenMP |
+| 1,024 | 5.643 ms | **0.381 ms** | 0.969 ms | OpenMP |
+| 2,048 | 22.715 ms | **1.448 ms** | 1.745 ms | OpenMP |
+| 4,096 | 90.795 ms | 5.661 ms | **3.305 ms** | CUDA |
+| 16,384 | 1,452.204 ms | 90.427 ms | **35.282 ms** | CUDA |
+
+![CARC A40 paired exact-force CPU-CUDA crossover](visualization/output/carc-a40-crossover.png)
+
+**CARC result:** the crossover moves to between **N=2,048 and N=4,096**, with
+the first CUDA win at N=4,096 for all four families. At N=16,384, the A40 is
+**2.56x faster than 16-thread OpenMP** and **41.16x faster than serial CPU**.
+This confirms the expected crossover while showing that its location is not a
+universal particle count.
 
 ## Finding 2: CUDA tiling helps most at smaller sizes
 
@@ -157,8 +177,9 @@ the hardest case, showing that generalization is still the main limitation.
 
 ## Conclusions
 
-1. **OpenMP is best for small local problems; tiled CUDA wins after roughly
-   1,000–2,000 bodies on this machine.**
+1. **OpenMP is best for small problems; tiled CUDA wins as N grows.** The
+   measured crossover was 1,024–2,048 bodies on the laptop and 2,048–4,096 on
+   the CARC A40 node.
 2. **The hierarchical ML method successfully removes force calculations**, and
    the fraction of removed work improves as the simulation grows.
 3. **ML can beat exact CUDA at large N**, but the result depends strongly on the
@@ -175,9 +196,10 @@ the hardest case, showing that generalization is still the main limitation.
 - A stratified sample of **84 CUDA-generated force labels** passed independent
   serial FP64 validation. The maximum scaled difference was `1.73e-15`.
 
-The reported timings were measured on an NVIDIA GeForce RTX 3060 Laptop GPU
-with CUDA 12.8. Crossover points are hardware-specific and should be remeasured
-on other systems.
+The local timings were measured on an NVIDIA GeForce RTX 3060 Laptop GPU with
+CUDA 12.8. The independent CARC run used an NVIDIA A40, an AMD EPYC 7282 CPU,
+and CUDA 12.6. The different crossover regions demonstrate why crossover
+points must be remeasured on each system.
 
 ## More information
 
